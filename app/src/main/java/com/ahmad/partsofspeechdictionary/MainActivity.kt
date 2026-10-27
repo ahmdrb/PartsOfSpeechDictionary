@@ -91,14 +91,14 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
 
         val definitions = result.definitions
             .mapIndexed { index, item ->
-                "${index + 1}. [${item.partOfSpeech}] ${item.definition}"
+                "${index + 1}. ${item.definition}"
             }
-            .joinToString("\\n")
+            .joinToString("\n")
 
         val examples = result.definitions
             .filter { it.example.isNotBlank() }
             .distinctBy { it.example }
-            .joinToString("\\n") { "• ${it.example}" }
+            .joinToString("\n") { "• ${it.example}" }
 
         save(DictionaryEntry(
             word = result.word,
@@ -214,9 +214,20 @@ fun DictionaryScreen(vm: DictionaryViewModel) {
                                     Text(entry.categories, color = MaterialTheme.colorScheme.primary,
                                         style = MaterialTheme.typography.labelMedium)
                                 }
+                                if (entry.pronunciation.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        entry.pronunciation,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
                                 if (entry.definitions.isNotBlank()) {
                                     Spacer(Modifier.height(4.dp))
-                                    Text(entry.definitions, maxLines = 3)
+                                    val cleanDefinitions = entry.definitions
+                                        .replace("\\n", "\n")
+                                        .replace(Regex("\\s*\\[[^]]+\\]\\s*"), " ")
+                                        .replace(Regex("[ \t]+"), " ")
+                                    Text(cleanDefinitions, maxLines = 5)
                                 }
                             }
                         }
