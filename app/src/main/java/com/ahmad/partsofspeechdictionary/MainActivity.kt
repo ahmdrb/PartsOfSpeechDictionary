@@ -28,6 +28,8 @@ import com.ahmad.partsofspeechdictionary.data.*
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,10 +54,62 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var selectedCategory by mutableStateOf<String?>(null)
     var showEditor by mutableStateOf(false)
     var selectedEntry by mutableStateOf<DictionaryEntry?>(null)
+    var onlineResult by mutableStateOf<OnlineDictionaryResult?>(null)
+    var isLookingUp by mutableStateOf(false)
+    var lookupError by mutableStateOf<String?>(null)
 
     val entries = repository.entries("").stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
+
+    fun lookupOnline() {
+        val word = query.trim()
+        if (word.isBlank() || isLookingUp) return
+
+        viewModelScope.launch {
+            isLookingUp = true
+            lookupError = null
+            onlineResult = null
+            try {
+                onlineResult = withContext(Dispatchers.IO) {
+                    OnlineDictionaryClient.lookup(word)
+                }
+            } catch (e: Exception) {
+                lookupError = e.message ?: "Lookup failed. Check your internet connection."
+            } finally {
+                isLookingUp = false
+            }
+        }
+    }
+
+    fun saveOnlineResult(result: OnlineDictionaryResult) {
+        val categories = result.definitions
+            .map { it.partOfSpeech.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(", ")
+
+        val definitions = result.definitions
+            .mapIndexed { index, item ->
+                "${index + 1}. [${item.partOfSpeech}] ${item.definition}"
+            }
+            .joinToString("\\n")
+
+        val examples = result.definitions
+            .filter { it.example.isNotBlank() }
+            .distinctBy { it.example }
+            .joinToString("\\n") { "• ${it.example}" }
+
+        save(DictionaryEntry(
+            word = result.word,
+            definitions = definitions,
+            examples = examples,
+            pronunciation = result.pronunciation,
+            categories = categories,
+            source = "Free Dictionary API"
+        ))
+        onlineResult = null
+    }
 
     fun save(entry: DictionaryEntry) {
         viewModelScope.launch { repository.save(entry); showEditor = false; selectedEntry = null }
@@ -97,6 +151,32 @@ fun DictionaryScreen(vm: DictionaryViewModel) {
                 label = { Text("Search words and definitions") },
                 singleLine = true
             )
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = { vm.lookupOnline() },
+                enabled = vm.query.isNotBlank() && !vm.isLookingUp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (vm.isLookingUp) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Looking up online...")
+                } else {
+                    Text("Look up online")
+                }
+            }
+
+            vm.lookupError?.let { error ->
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
             Spacer(Modifier.height(12.dp))
             Text("Browse categories", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
@@ -145,6 +225,60 @@ fun DictionaryScreen(vm: DictionaryViewModel) {
             }
         }
     }
+    vm.onlineResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = { vm.onlineResult = null },
+            title = {
+                Column {
+                    Text(result.word, style = MaterialTheme.typography.headlineSmall)
+                    if (result.pronunciation.isNotBlank()) {
+                        Text(
+                            result.pronunciation,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    result.definitions.forEachIndexed { index, item ->
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                "${index + 1}. ${item.partOfSpeech.ifBlank { "Definition" }}",
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(item.definition)
+                            if (item.example.isNotBlank()) {
+                                Text(
+                                    "Example: ${item.example}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Source: Free Dictionary API",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.saveOnlineResult(result) }) {
+                    Text("Save to my dictionary")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.onlineResult = null }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
     if (vm.showEditor) {
         EntryEditor(
             initial = vm.selectedEntry,
