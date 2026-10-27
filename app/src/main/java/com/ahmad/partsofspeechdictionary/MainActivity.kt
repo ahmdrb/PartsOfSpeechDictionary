@@ -1,0 +1,194 @@
+package com.ahmad.partsofspeechdictionary
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.ahmad.partsofspeechdictionary.data.*
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val db = AppDatabase.get(this)
+        val repository = DictionaryRepository(db.dictionaryDao())
+        setContent {
+            MaterialTheme(colorScheme = lightColorScheme()) {
+                val vm: DictionaryViewModel = viewModel(factory = object : ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                        DictionaryViewModel(repository) as T
+                })
+                DictionaryScreen(vm)
+            }
+        }
+    }
+}
+
+class DictionaryViewModel(private val repository: DictionaryRepository) : ViewModel() {
+    var query by mutableStateOf("")
+    var selectedCategory by mutableStateOf<String?>(null)
+    var showEditor by mutableStateOf(false)
+    var selectedEntry by mutableStateOf<DictionaryEntry?>(null)
+
+    val entries = repository.entries("").stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+
+    fun save(entry: DictionaryEntry) {
+        viewModelScope.launch { repository.save(entry); showEditor = false; selectedEntry = null }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DictionaryScreen(vm: DictionaryViewModel) {
+    val allEntries by vm.entries.collectAsStateWithLifecycle()
+    val visible = allEntries.filter { entry ->
+        (vm.query.isBlank() || entry.word.contains(vm.query, true) ||
+            entry.definitions.contains(vm.query, true)) &&
+        (vm.selectedCategory == null || entry.categories.split(",").any {
+            it.trim().equals(vm.selectedCategory, true)
+        })
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(title = {
+                Column {
+                    Text("Wordwise", fontWeight = FontWeight.Bold)
+                    Text("Parts of Speech Dictionary", style = MaterialTheme.typography.labelSmall)
+                }
+            })
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { vm.selectedEntry = null; vm.showEditor = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add word")
+            }
+        }
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+            OutlinedTextField(
+                value = vm.query, onValueChange = { vm.query = it },
+                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                label = { Text("Search words and definitions") },
+                singleLine = true
+            )
+            Spacer(Modifier.height(12.dp))
+            Text("Browse categories", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                FilterChip(selected = vm.selectedCategory == null,
+                    onClick = { vm.selectedCategory = null }, label = { Text("All") })
+                Spacer(Modifier.width(8.dp))
+                GrammarTaxonomy.mainCategories.forEach { category ->
+                    Spacer(Modifier.width(6.dp))
+                    FilterChip(selected = vm.selectedCategory == category,
+                        onClick = { vm.selectedCategory = if (vm.selectedCategory == category) null else category },
+                        label = { Text(category) })
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (visible.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (allEntries.isEmpty()) "Your dictionary starts here" else "No matching entries")
+                        Spacer(Modifier.height(6.dp))
+                        Text("Tap + to add a word and save its details.",
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(visible, key = { it.id }) { entry ->
+                        ElevatedCard(Modifier.fillMaxWidth().clickable {
+                            vm.selectedEntry = entry; vm.showEditor = true
+                        }) {
+                            Column(Modifier.padding(14.dp)) {
+                                Text(entry.word, style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold)
+                                if (entry.categories.isNotBlank()) {
+                                    Text(entry.categories, color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.labelMedium)
+                                }
+                                if (entry.definitions.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(entry.definitions, maxLines = 3)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (vm.showEditor) {
+        EntryEditor(
+            initial = vm.selectedEntry,
+            onDismiss = { vm.showEditor = false; vm.selectedEntry = null },
+            onSave = vm::save
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (DictionaryEntry) -> Unit) {
+    var word by remember(initial) { mutableStateOf(initial?.word.orEmpty()) }
+    var definitions by remember(initial) { mutableStateOf(initial?.definitions.orEmpty()) }
+    var categories by remember(initial) { mutableStateOf(initial?.categories.orEmpty()) }
+    var examples by remember(initial) { mutableStateOf(initial?.examples.orEmpty()) }
+    var pronunciation by remember(initial) { mutableStateOf(initial?.pronunciation.orEmpty()) }
+    var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "Add dictionary entry" else "Edit entry") },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(word, { word = it }, label = { Text("Word *") }, singleLine = true)
+                OutlinedTextField(categories, { categories = it },
+                    label = { Text("Parts of speech (comma-separated)") },
+                    supportingText = { Text("Example: Noun, Verb") })
+                OutlinedTextField(definitions, { definitions = it }, label = { Text("Definitions") })
+                OutlinedTextField(examples, { examples = it }, label = { Text("Examples") })
+                OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
+                OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = word.isNotBlank(), onClick = {
+                onSave(DictionaryEntry(
+                    id = initial?.id ?: 0, word = word, definitions = definitions,
+                    categories = categories, examples = examples, pronunciation = pronunciation,
+                    notes = notes, source = initial?.source ?: "User entry"
+                ))
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
