@@ -81,6 +81,10 @@ class DictionaryViewModel(
     var entryToDelete by mutableStateOf<DictionaryEntry?>(null)
     var expandedEntryId by mutableStateOf<Long?>(null)
     var actionsEntryId by mutableStateOf<Long?>(null)
+    var relatedWord by mutableStateOf("")
+        private set
+    var relatedWordMessage by mutableStateOf<String?>(null)
+        private set
     var selectedCollectionId by mutableStateOf<Long?>(null)
         private set
     var collectionBeingEdited by mutableStateOf<WordCollection?>(null)
@@ -324,8 +328,59 @@ class DictionaryViewModel(
         backupError = null
     }
 
+    fun openRelatedWord(word: String) {
+        val target = word.trim()
+        if (target.isBlank()) return
+
+        viewModelScope.launch {
+            val existing = repository.findByWord(target)
+            if (existing != null) {
+                query = ""
+                selectedCategory = null
+                selectedCollectionFlow.value = null
+                selectedCollectionId = null
+                expandedEntryId = existing.id
+                actionsEntryId = null
+                relatedWord = ""
+                relatedWordMessage = null
+            } else {
+                relatedWord = target
+                relatedWordMessage = "\"$target\" isn't saved in your dictionary yet."
+            }
+        }
+    }
+
+    fun addRelatedWordManually() {
+        val target = relatedWord
+        if (target.isBlank()) return
+
+        selectedEntry = DictionaryEntry(word = target)
+        showEditor = true
+        relatedWord = ""
+        relatedWordMessage = null
+    }
+
+    fun dismissRelatedWordPrompt() {
+        relatedWord = ""
+        relatedWordMessage = null
+    }
+
+    fun lookupRelatedWordOnline() {
+        val target = relatedWord.trim()
+        if (target.isBlank()) return
+
+        query = target
+        relatedWord = ""
+        relatedWordMessage = null
+        lookupOnline()
+    }
+
     fun save(entry: DictionaryEntry) {
-        viewModelScope.launch { repository.save(entry); showEditor = false; selectedEntry = null }
+        viewModelScope.launch {
+            repository.save(entry)
+            showEditor = false
+            selectedEntry = null
+        }
     }
 }
 
@@ -654,12 +709,32 @@ fun DictionaryScreen(
                                     if (entry.notes.isNotBlank()) {
                                         Text("Personal Notes: ${entry.notes}")
                                     }
-                                    if (entry.synonyms.isNotBlank()) {
-                                        Text("Synonyms: ${entry.synonyms}")
+                                    if (
+                                        entry.synonyms.isNotBlank() ||
+                                        entry.antonyms.isNotBlank() ||
+                                        entry.collocations.isNotBlank()
+                                    ) {
+                                        Text(
+                                            "Word Relationships",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
-                                    if (entry.antonyms.isNotBlank()) {
-                                        Text("Antonyms: ${entry.antonyms}")
-                                    }
+                                    WordRelationshipRow(
+                                        label = "Synonyms",
+                                        words = entry.synonyms,
+                                        onWordClick = vm::openRelatedWord
+                                    )
+                                    WordRelationshipRow(
+                                        label = "Antonyms",
+                                        words = entry.antonyms,
+                                        onWordClick = vm::openRelatedWord
+                                    )
+                                    WordRelationshipRow(
+                                        label = "Collocations",
+                                        words = entry.collocations,
+                                        onWordClick = vm::openRelatedWord
+                                    )
                                 }
 
                                 if (vm.actionsEntryId == entry.id) {
@@ -695,6 +770,33 @@ fun DictionaryScreen(
             }
         }
     }
+    vm.relatedWordMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissRelatedWordPrompt() },
+            title = { Text("Word relationship") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { vm.addRelatedWordManually() }) {
+                    Text("Add Manually")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = { vm.lookupRelatedWordOnline() }
+                    ) {
+                        Text("Look Up Online")
+                    }
+                    TextButton(
+                        onClick = { vm.dismissRelatedWordPrompt() }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
+
     vm.onlineResult?.let { result ->
         AlertDialog(
             onDismissRequest = { vm.onlineResult = null },
@@ -1001,6 +1103,35 @@ fun DictionaryScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun WordRelationshipRow(
+    label: String,
+    words: String,
+    onWordClick: (String) -> Unit
+) {
+    val items = words.split(",", ";", "\n")
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+
+    if (items.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items.forEach { relatedWord ->
+                    SuggestionChip(
+                        onClick = { onWordClick(relatedWord) },
+                        label = { Text(relatedWord) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (DictionaryEntry) -> Unit) {
     var word by remember(initial) { mutableStateOf(initial?.word.orEmpty()) }
     var definitions by remember(initial) { mutableStateOf(initial?.definitions.orEmpty()) }
@@ -1009,6 +1140,10 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
     var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
     var synonyms by remember(initial) { mutableStateOf(initial?.synonyms.orEmpty()) }
     var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
+    var examples by remember(initial) { mutableStateOf(initial?.examples.orEmpty()) }
+    var collocations by remember(initial) { mutableStateOf(initial?.collocations.orEmpty()) }
+    var origin by remember(initial) { mutableStateOf(initial?.origin.orEmpty()) }
+    var translation by remember(initial) { mutableStateOf(initial?.translation.orEmpty()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Add dictionary entry" else "Edit entry") },
@@ -1023,6 +1158,10 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                 OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
                 OutlinedTextField(synonyms, { synonyms = it }, label = { Text("Synonyms (comma-separated)") })
                 OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
+                OutlinedTextField(collocations, { collocations = it }, label = { Text("Collocations (comma-separated)") })
+                OutlinedTextField(examples, { examples = it }, label = { Text("Examples") })
+                OutlinedTextField(origin, { origin = it }, label = { Text("Word origin") })
+                OutlinedTextField(translation, { translation = it }, label = { Text("Translation") })
                 OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
             }
         },
@@ -1032,12 +1171,17 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                     id = initial?.id ?: 0,
                     word = word,
                     definitions = definitions,
+                    examples = examples,
                     categories = categories,
                     pronunciation = pronunciation,
                     notes = notes,
                     source = initial?.source ?: "User entry",
                     synonyms = synonyms,
                     antonyms = antonyms,
+                    collocations = collocations,
+                    origin = origin,
+                    translation = translation,
+                    updatedAt = initial?.updatedAt ?: System.currentTimeMillis(),
                 ))
             }) { Text("Save") }
         },

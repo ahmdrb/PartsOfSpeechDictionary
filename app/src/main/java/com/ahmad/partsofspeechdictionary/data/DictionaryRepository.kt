@@ -10,6 +10,9 @@ class DictionaryRepository(private val dao: DictionaryDao) {
         entry.copy(word = entry.word.trim(), updatedAt = System.currentTimeMillis())
     )
 
+    suspend fun findByWord(word: String): DictionaryEntry? =
+        dao.getByWord(word.trim())
+
     suspend fun delete(id: Long) = dao.deleteById(id)
 
     fun collections(): Flow<List<WordCollection>> = dao.observeCollections()

@@ -43,6 +43,9 @@ interface DictionaryDao {
     @Query("SELECT * FROM dictionary_entries WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): DictionaryEntry?
 
+    @Query("SELECT * FROM dictionary_entries WHERE word = :word COLLATE NOCASE LIMIT 1")
+    suspend fun getByWord(word: String): DictionaryEntry?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun save(entry: DictionaryEntry): Long
 
