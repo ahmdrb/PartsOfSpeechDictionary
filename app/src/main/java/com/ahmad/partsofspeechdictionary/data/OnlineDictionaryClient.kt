@@ -194,6 +194,19 @@ object OnlineDictionaryClient {
                         ?.jsonPrimitive
                         ?.contentOrNull
                         .orEmpty()
+
+                    if (pronunciation.isBlank()) {
+                        val phonetics = obj["phonetics"] as? JsonArray
+                        pronunciation = phonetics
+                            ?.firstNotNullOfOrNull { phonetic ->
+                                phonetic.jsonObject["text"]
+                                    ?.jsonPrimitive
+                                    ?.contentOrNull
+                                    ?.trim()
+                                    ?.takeIf { it.isNotBlank() }
+                            }
+                            .orEmpty()
+                    }
                 }
 
                 if (origin.isBlank()) {

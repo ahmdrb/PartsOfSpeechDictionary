@@ -418,6 +418,13 @@ fun DictionaryScreen(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
+                    if (result.collocations.isNotBlank()) {
+                        Text(
+                            "Possible word combinations: ${result.collocations}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
                     if (result.origin.isNotBlank()) {
                         Text(
                             "Origin: ${result.origin}",
