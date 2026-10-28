@@ -26,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -554,19 +555,119 @@ fun DictionaryScreen(
             }
 
             Spacer(Modifier.height(12.dp))
-            Text("Browse categories", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                FilterChip(selected = vm.selectedCategory == null,
-                    onClick = { vm.selectedCategory = null }, label = { Text("All") })
-                Spacer(Modifier.width(8.dp))
-                GrammarTaxonomy.mainCategories.forEach { category ->
-                    Spacer(Modifier.width(6.dp))
-                    FilterChip(selected = vm.selectedCategory == category,
-                        onClick = { vm.selectedCategory = if (vm.selectedCategory == category) null else category },
-                        label = { Text(category) })
+            Text("Browse Categories", style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("Explore your vocabulary",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(14.dp))
+
+            val browseCategories = listOf("All") + GrammarTaxonomy.mainCategories
+            val categoryColors = listOf(
+                MaterialTheme.colorScheme.primaryContainer,
+                MaterialTheme.colorScheme.secondaryContainer,
+                MaterialTheme.colorScheme.tertiaryContainer,
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.surfaceVariant
+            )
+            val categoryIcons = mapOf(
+                "All" to "📚",
+                "Noun" to "🔵", "Nouns" to "🔵",
+                "Verb" to "🟢", "Verbs" to "🟢",
+                "Adjective" to "🟣", "Adjectives" to "🟣",
+                "Adverb" to "🟠", "Adverbs" to "🟠",
+                "Pronoun" to "👤", "Pronouns" to "👤",
+                "Preposition" to "📍", "Prepositions" to "📍",
+                "Conjunction" to "🔗", "Conjunctions" to "🔗",
+                "Interjection" to "💬", "Interjections" to "💬"
+            )
+
+            Text(
+                "YOUR COLLECTION",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                "${allEntries.size} saved words · ${GrammarTaxonomy.mainCategories.size} categories",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+
+            browseCategories.chunked(2).forEachIndexed { rowIndex, rowCategories ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rowCategories.forEach { category ->
+                        val isAll = category == "All"
+                        val count = if (isAll) {
+                            allEntries.size
+                        } else {
+                            allEntries.count { entry ->
+                                entry.categories.split(",").any {
+                                    it.trim().equals(category, ignoreCase = true)
+                                }
+                            }
+                        }
+                        val selected = if (isAll) {
+                            vm.selectedCategory == null
+                        } else {
+                            vm.selectedCategory == category
+                        }
+                        val accent = categoryColors[
+                            (rowIndex * 2 + rowCategories.indexOf(category)) % categoryColors.size
+                        ]
+
+                        ElevatedCard(
+                            onClick = {
+                                vm.selectedCategory = if (isAll || selected) null else category
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.elevatedCardColors(
+                                containerColor = if (selected) accent
+                                    else accent.copy(alpha = 0.62f)
+                            ),
+                            elevation = CardDefaults.elevatedCardElevation(
+                                defaultElevation = if (selected) 3.dp else 1.dp
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    categoryIcons[category] ?: "✨",
+                                    style = MaterialTheme.typography.headlineSmall
+                                )
+                                Text(
+                                    category,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    "$count ${if (count == 1) "word" else "words"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    if (selected) "Selected ✓" else "Tap to browse →",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                    if (rowCategories.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
+                Spacer(Modifier.height(10.dp))
             }
+
             Spacer(Modifier.height(14.dp))
             Text("Collections", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
