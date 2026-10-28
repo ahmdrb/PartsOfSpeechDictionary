@@ -34,8 +34,13 @@ object OnlineDictionaryClient {
         word: String
     ): List<String> {
         val encodedWord = URLEncoder.encode(word, "UTF-8")
+        val pattern = if (relation == "lc" || relation == "rc") {
+            "sp=*&"
+        } else {
+            ""
+        }
         val url = URL(
-            "https://api.datamuse.com/words?$relation=$encodedWord&max=10"
+            "https://api.datamuse.com/words?$pattern$relation=$encodedWord&max=10"
         )
 
         val connection = url.openConnection() as HttpURLConnection
@@ -68,13 +73,26 @@ object OnlineDictionaryClient {
     }
 
     private fun fetchCollocations(word: String): String {
-        val preceding = fetchRelatedWords("lc", word)
-            .take(5)
-            .map { "$it $word" }
+        val commonWords = setOf(
+            "a", "an", "the", "and", "or", "but", "if", "of", "in",
+            "on", "at", "by", "for", "from", "as", "is", "are", "was",
+            "were", "be", "been", "being", "it", "its", "not", "."
+        )
 
-        val following = fetchRelatedWords("rc", word)
-            .take(5)
-            .map { "$word $it" }
+        fun usefulContextWords(relation: String): List<String> =
+            fetchRelatedWords(relation, word)
+                .asSequence()
+                .map { it.trim().lowercase() }
+                .filter { it.isNotBlank() }
+                .filter { it.matches(Regex("[a-z][a-z'-]*")) }
+                .filter { it !in commonWords }
+                .filter { it != word.lowercase() }
+                .distinct()
+                .take(5)
+                .toList()
+
+        val preceding = usefulContextWords("lc").map { "$it $word" }
+        val following = usefulContextWords("rc").map { "$word $it" }
 
         return (following + preceding)
             .distinct()
@@ -121,11 +139,20 @@ object OnlineDictionaryClient {
 
             etymology
                 .replace(Regex("<ref[^>]*>.*?</ref>", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("\\{\\{[^{}]*}}"), "")
+                .replace(Regex("<ref[^>]*/>", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("\\[\\[([^]|]+)\\|([^]]+)]]"), "$2")
                 .replace(Regex("\\[\\[([^]]+)]]"), "$1")
                 .replace(Regex("'{2,5}"), "")
                 .replace(Regex("<[^>]+>"), "")
+                .replace(Regex("\\{\\{([^{}]*)}}")) { match ->
+                    val parts = match.groupValues[1].split("|")
+                    val preferred = parts.drop(1)
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() && !it.contains("=") }
+                        .lastOrNull()
+                    preferred ?: ""
+                }
+                .replace(Regex("\\[\\[([^]]+)]]"), "$1")
                 .replace(Regex("\\s+"), " ")
                 .trim()
                 .take(500)
