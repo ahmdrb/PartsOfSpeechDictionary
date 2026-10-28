@@ -24,7 +24,6 @@ data class OnlineDictionaryResult(
     val synonyms: String = "",
     val antonyms: String = "",
     val origin: String = "",
-    val translation: String = "",
     val collocations: String = ""
 )
 

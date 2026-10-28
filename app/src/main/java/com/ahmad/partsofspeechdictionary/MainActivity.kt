@@ -66,9 +66,6 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var onlineResult by mutableStateOf<OnlineDictionaryResult?>(null)
     var isLookingUp by mutableStateOf(false)
     var lookupError by mutableStateOf<String?>(null)
-    var targetLanguage by mutableStateOf("id")
-    var isTranslating by mutableStateOf(false)
-    var translationStatus by mutableStateOf("")
 
     val entries = repository.entries("").stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -82,21 +79,11 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             isLookingUp = true
             lookupError = null
             onlineResult = null
-            translationStatus = ""
             try {
                 val dictionaryResult = withContext(Dispatchers.IO) {
                     OnlineDictionaryClient.lookup(word)
                 }
-                val translationResult = withContext(Dispatchers.IO) {
-                    TranslationClient.translate(
-                        text = dictionaryResult.word,
-                        targetLanguage = targetLanguage
-                    )
-                }
-                translationStatus = translationResult.status
-                onlineResult = dictionaryResult.copy(
-                    translation = translationResult.text
-                )
+                onlineResult = dictionaryResult
             } catch (e: Exception) {
                 lookupError = e.message ?: "Lookup failed. Check your internet connection."
             } finally {
@@ -125,7 +112,6 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             categories = categories,
             synonyms = result.synonyms,
             antonyms = result.antonyms,
-            translation = result.translation,
             source = "Free Dictionary API + Datamuse"
         ))
         onlineResult = null
@@ -175,55 +161,7 @@ fun DictionaryScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(8.dp))
-            var languageMenuExpanded by remember { mutableStateOf(false) }
-            val languages = listOf(
-                "Indonesian" to "id",
-                "Spanish" to "es",
-                "French" to "fr",
-                "German" to "de",
-                "Japanese" to "ja",
-                "Chinese" to "zh",
-                "Korean" to "ko",
-                "Arabic" to "ar",
-                "Hindi" to "hi",
-                "Portuguese" to "pt",
-                "Russian" to "ru",
-                "Italian" to "it"
-            )
-            ExposedDropdownMenuBox(
-                expanded = languageMenuExpanded,
-                onExpandedChange = { languageMenuExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = languages.firstOrNull { it.second == vm.targetLanguage }?.first
-                        ?: vm.targetLanguage,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Translate word to") },
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(
-                            expanded = languageMenuExpanded
-                        )
-                    },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
-                )
-                ExposedDropdownMenu(
-                    expanded = languageMenuExpanded,
-                    onDismissRequest = { languageMenuExpanded = false }
-                ) {
-                    languages.forEach { (name, code) ->
-                        DropdownMenuItem(
-                            text = { Text(name) },
-                            onClick = {
-                                vm.targetLanguage = code
-                                languageMenuExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { vm.lookupOnline() },
                 enabled = vm.query.isNotBlank() && !vm.isLookingUp,
@@ -328,9 +266,6 @@ fun DictionaryScreen(
                                 if (entry.antonyms.isNotBlank()) {
                                     Text("Antonyms: ${entry.antonyms}")
                                 }
-                                if (entry.translation.isNotBlank()) {
-                                    Text("Translation: ${entry.translation}")
-                                }
                             }
                         }
                     }
@@ -380,17 +315,6 @@ fun DictionaryScreen(
                             )
                             Text(item.definition)
                         }
-                    }
-                    if (result.translation.isNotBlank()) {
-                        Text(
-                            "Translation (${vm.targetLanguage}): ${result.translation}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    } else if (vm.translationStatus.isNotBlank()) {
-                        Text(
-                            "Translation status: ${vm.translationStatus}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
                     }
                     if (result.synonyms.isNotBlank()) {
                         Text(
@@ -443,9 +367,6 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
     var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
     var synonyms by remember(initial) { mutableStateOf(initial?.synonyms.orEmpty()) }
     var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
-    var translation by remember(initial) {
-    mutableStateOf(initial?.translation.orEmpty())
-}
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Add dictionary entry" else "Edit entry") },
@@ -460,12 +381,6 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                 OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
                 OutlinedTextField(synonyms, { synonyms = it }, label = { Text("Synonyms (comma-separated)") })
                 OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
-                OutlinedTextField(
-    value = translation,
-    onValueChange = { translation = it },
-    label = { Text("Translation") },
-    supportingText = { Text("Enter the meaning in your selected language") }
-)
                 OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
             }
         },
@@ -481,7 +396,6 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                     source = initial?.source ?: "User entry",
                     synonyms = synonyms,
                     antonyms = antonyms,
-                    translation = translation
                 ))
             }) { Text("Save") }
         },
