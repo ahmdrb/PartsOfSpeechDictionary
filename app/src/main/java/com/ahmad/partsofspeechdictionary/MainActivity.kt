@@ -692,13 +692,7 @@ fun DictionaryScreen(
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
-                                }
-
-                                if (vm.expandedEntryId == entry.id) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End
-                                    ) {
+                                    if (vm.expandedEntryId == entry.id) {
                                         IconButton(
                                             onClick = { pronunciationHelper.speak(entry.word) }
                                         ) {
@@ -708,6 +702,9 @@ fun DictionaryScreen(
                                             )
                                         }
                                     }
+                                }
+
+                                if (vm.expandedEntryId == entry.id) {
                                     if (entry.categories.isNotBlank()) {
                                         Text(
                                             entry.categories,
