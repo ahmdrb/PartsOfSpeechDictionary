@@ -83,6 +83,59 @@ object OnlineDictionaryClient {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    private fun fetchOriginFromWiktionary(word: String): String {
+        val encodedWord = URLEncoder.encode(word, "UTF-8")
+        val url = URL(
+            "https://en.wiktionary.org/w/api.php?action=parse&page=$encodedWord&prop=wikitext&format=json&formatversion=2"
+        )
+        val connection = url.openConnection() as HttpURLConnection
+
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty(
+                "User-Agent",
+                "WordwiseDictionary/1.0 (educational dictionary app)"
+            )
+
+            if (connection.responseCode !in 200..299) {
+                return ""
+            }
+
+            val response = connection.inputStream
+                .bufferedReader()
+                .use { it.readText() }
+
+            val root = json.parseToJsonElement(response).jsonObject
+            val wikitext = root["parse"]
+                ?.jsonObject
+                ?.get("wikitext")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: return ""
+
+            val etymology = Regex(
+                "(?is)==+\\s*Etymology\\s*==+\\s*(.*?)(?=\\n==+\\s*[^=]|$)"
+            ).find(wikitext)?.groupValues?.get(1) ?: return ""
+
+            etymology
+                .replace(Regex("<ref[^>]*>.*?</ref>", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\{\\{[^{}]*}}"), "")
+                .replace(Regex("\\[\\[([^]|]+)\\|([^]]+)]]"), "$2")
+                .replace(Regex("\\[\\[([^]]+)]]"), "$1")
+                .replace(Regex("'{2,5}"), "")
+                .replace(Regex("<[^>]+>"), "")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .take(500)
+        } catch (_: Exception) {
+            ""
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     fun lookup(word: String): OnlineDictionaryResult {
         val cleanedWord = word.trim()
         require(cleanedWord.isNotBlank()) { "Enter a word first." }
@@ -204,13 +257,25 @@ object OnlineDictionaryClient {
                 )
             }
 
+            // Fallback: ask Datamuse when the dictionary has no synonyms.
+            if (synonyms.isEmpty()) {
+                synonyms.addAll(fetchRelatedWords("rel_syn", cleanedWord))
+            }
+
+            // Fallback: ask Datamuse when the dictionary has no antonyms.
+            if (antonyms.isEmpty()) {
+                antonyms.addAll(fetchRelatedWords("rel_ant", cleanedWord))
+            }
+
             return OnlineDictionaryResult(
                 word = cleanedWord,
                 pronunciation = pronunciation,
                 definitions = definitions,
                 synonyms = synonyms.joinToString(", "),
                 antonyms = antonyms.joinToString(", "),
-                origin = origin,
+                origin = origin.ifBlank {
+                    fetchOriginFromWiktionary(cleanedWord)
+                },
                 collocations = fetchCollocations(cleanedWord)
             )
         } finally {
