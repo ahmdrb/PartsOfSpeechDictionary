@@ -69,6 +69,8 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var isLookingUp by mutableStateOf(false)
     var lookupError by mutableStateOf<String?>(null)
     var entryToDelete by mutableStateOf<DictionaryEntry?>(null)
+    var expandedEntryId by mutableStateOf<Long?>(null)
+    var actionsEntryId by mutableStateOf<Long?>(null)
 
     val entries = repository.entries("").stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -231,31 +233,74 @@ fun DictionaryScreen(
                         ElevatedCard(
                             modifier = Modifier.fillMaxWidth().combinedClickable(
                                 onClick = {
-                                    vm.selectedEntry = entry
-                                    vm.showEditor = true
+                                    vm.expandedEntryId =
+                                        if (vm.expandedEntryId == entry.id) null else entry.id
+                                    vm.actionsEntryId = null
                                 },
                                 onLongClick = {
-                                    vm.entryToDelete = entry
+                                    vm.actionsEntryId =
+                                        if (vm.actionsEntryId == entry.id) null else entry.id
                                 }
                             )
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
                                     entry.word,
-                                    modifier = Modifier.weight(1f),
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
-                                IconButton(onClick = {
-                                    pronunciationHelper.speak(entry.word)
-                                }) {
-                                    Icon(
-                                        Icons.Default.VolumeUp,
-                                        contentDescription = "Pronounce ${entry.word}"
-                                    )
+
+                                if (vm.expandedEntryId == entry.id) {
+                                    if (entry.categories.isNotBlank()) {
+                                        Text(
+                                            entry.categories,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+                                    if (entry.pronunciation.isNotBlank()) {
+                                        Text("Pronunciation: ${entry.pronunciation}")
+                                    }
+                                    if (entry.definitions.isNotBlank()) {
+                                        val cleanDefinitions = entry.definitions
+                                            .replace("\\n", "\n")
+                                            .replace(Regex("\\s*\\[[^]]+\\]\\s*"), " ")
+                                            .replace(Regex("[ \\t]+"), " ")
+                                        Text(cleanDefinitions)
+                                    }
+                                    if (entry.notes.isNotBlank()) {
+                                        Text("Personal Notes: ${entry.notes}")
+                                    }
+                                    if (entry.synonyms.isNotBlank()) {
+                                        Text("Synonyms: ${entry.synonyms}")
+                                    }
+                                    if (entry.antonyms.isNotBlank()) {
+                                        Text("Antonyms: ${entry.antonyms}")
+                                    }
+                                }
+
+                                if (vm.actionsEntryId == entry.id) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        TextButton(onClick = {
+                                            vm.selectedEntry = entry
+                                            vm.showEditor = true
+                                            vm.actionsEntryId = null
+                                        }) {
+                                            Text("Edit")
+                                        }
+                                        TextButton(onClick = {
+                                            vm.entryToDelete = entry
+                                            vm.actionsEntryId = null
+                                        }) {
+                                            Text("Delete")
+                                        }
+                                    }
                                 }
                             }
                         }
