@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -66,6 +68,7 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var onlineResult by mutableStateOf<OnlineDictionaryResult?>(null)
     var isLookingUp by mutableStateOf(false)
     var lookupError by mutableStateOf<String?>(null)
+    var entryToDelete by mutableStateOf<DictionaryEntry?>(null)
 
     val entries = repository.entries("").stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -117,12 +120,23 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
         onlineResult = null
     }
 
+    fun delete(entry: DictionaryEntry) {
+        viewModelScope.launch {
+            repository.delete(entry.id)
+            entryToDelete = null
+            if (selectedEntry?.id == entry.id) {
+                selectedEntry = null
+                showEditor = false
+            }
+        }
+    }
+
     fun save(entry: DictionaryEntry) {
         viewModelScope.launch { repository.save(entry); showEditor = false; selectedEntry = null }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DictionaryScreen(
     vm: DictionaryViewModel,
@@ -214,57 +228,34 @@ fun DictionaryScreen(
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(visible, key = { it.id }) { entry ->
-                        ElevatedCard(Modifier.fillMaxWidth().clickable {
-                            vm.selectedEntry = entry; vm.showEditor = true
-                        }) {
-                            Column(Modifier.padding(14.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        entry.word,
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.SemiBold
+                        ElevatedCard(
+                            modifier = Modifier.fillMaxWidth().combinedClickable(
+                                onClick = {
+                                    vm.selectedEntry = entry
+                                    vm.showEditor = true
+                                },
+                                onLongClick = {
+                                    vm.entryToDelete = entry
+                                }
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    entry.word,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                IconButton(onClick = {
+                                    pronunciationHelper.speak(entry.word)
+                                }) {
+                                    Icon(
+                                        Icons.Default.VolumeUp,
+                                        contentDescription = "Pronounce ${entry.word}"
                                     )
-                                    IconButton(onClick = {
-                                        pronunciationHelper.speak(entry.word)
-                                    }) {
-                                        Icon(
-                                            Icons.Default.VolumeUp,
-                                            contentDescription = "Pronounce ${entry.word}"
-                                        )
-                                    }
-                                }
-                                if (entry.categories.isNotBlank()) {
-                                    Text(entry.categories, color = MaterialTheme.colorScheme.primary,
-                                        style = MaterialTheme.typography.labelMedium)
-                                }
-                                if (entry.pronunciation.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        entry.pronunciation,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                                if (entry.definitions.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    val cleanDefinitions = entry.definitions
-                                        .replace("\\n", "\n")
-                                        .replace(Regex("\\s*\\[[^]]+\\]\\s*"), " ")
-                                        .replace(Regex("[ \t]+"), " ")
-                                    Text(cleanDefinitions, maxLines = 5)
-                                }
-                                if (entry.notes.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text("Personal Notes: ${entry.notes}")
-                                }
-                                if (entry.synonyms.isNotBlank()) {
-                                    Text("Synonyms: ${entry.synonyms}")
-                                }
-                                if (entry.antonyms.isNotBlank()) {
-                                    Text("Antonyms: ${entry.antonyms}")
                                 }
                             }
                         }
@@ -343,6 +334,26 @@ fun DictionaryScreen(
             dismissButton = {
                 TextButton(onClick = { vm.onlineResult = null }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    vm.entryToDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { vm.entryToDelete = null },
+            title = { Text("Delete word?") },
+            text = {
+                Text("Delete \"${entry.word}\" from your dictionary? This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.delete(entry) }) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.entryToDelete = null }) {
+                    Text("Cancel")
                 }
             }
         )
