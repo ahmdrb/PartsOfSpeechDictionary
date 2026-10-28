@@ -24,10 +24,63 @@ data class OnlineDictionaryResult(
     val synonyms: String = "",
     val antonyms: String = "",
     val origin: String = "",
-    val translation: String = ""
+    val translation: String = "",
+    val collocations: String = ""
 )
 
 object OnlineDictionaryClient {
+    private fun fetchRelatedWords(
+        relation: String,
+        word: String
+    ): List<String> {
+        val encodedWord = URLEncoder.encode(word, "UTF-8")
+        val url = URL(
+            "https://api.datamuse.com/words?$relation=$encodedWord&max=10"
+        )
+
+        val connection = url.openConnection() as HttpURLConnection
+
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+
+            if (connection.responseCode !in 200..299) {
+                return emptyList()
+            }
+
+            val response = connection.inputStream
+                .bufferedReader()
+                .use { it.readText() }
+
+            json.parseToJsonElement(response).jsonArray.mapNotNull { item ->
+                item.jsonObject["word"]
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun fetchCollocations(word: String): String {
+        val preceding = fetchRelatedWords("lc", word)
+            .take(5)
+            .map { "$it $word" }
+
+        val following = fetchRelatedWords("rc", word)
+            .take(5)
+            .map { "$word $it" }
+
+        return (following + preceding)
+            .distinct()
+            .joinToString(", ")
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
 
     fun lookup(word: String): OnlineDictionaryResult {
@@ -157,7 +210,8 @@ object OnlineDictionaryClient {
                 definitions = definitions,
                 synonyms = synonyms.joinToString(", "),
                 antonyms = antonyms.joinToString(", "),
-                origin = origin
+                origin = origin,
+                collocations = fetchCollocations(cleanedWord)
             )
         } finally {
             connection.disconnect()

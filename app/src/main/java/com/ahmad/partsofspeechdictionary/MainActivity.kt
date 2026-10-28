@@ -126,9 +126,10 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             categories = categories,
             synonyms = result.synonyms,
             antonyms = result.antonyms,
+            collocations = result.collocations,
             origin = result.origin,
             translation = result.translation,
-            source = "Free Dictionary API"
+            source = "Free Dictionary API + Datamuse"
         ))
         onlineResult = null
     }
