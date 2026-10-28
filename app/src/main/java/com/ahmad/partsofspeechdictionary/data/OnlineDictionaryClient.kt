@@ -73,30 +73,8 @@ object OnlineDictionaryClient {
     }
 
     private fun fetchCollocations(word: String): String {
-        val commonWords = setOf(
-            "a", "an", "the", "and", "or", "but", "if", "of", "in",
-            "on", "at", "by", "for", "from", "as", "is", "are", "was",
-            "were", "be", "been", "being", "it", "its", "not", "."
-        )
-
-        fun usefulContextWords(relation: String): List<String> =
-            fetchRelatedWords(relation, word)
-                .asSequence()
-                .map { it.trim().lowercase() }
-                .filter { it.isNotBlank() }
-                .filter { it.matches(Regex("[a-z][a-z'-]*")) }
-                .filter { it !in commonWords }
-                .filter { it != word.lowercase() }
-                .distinct()
-                .take(5)
-                .toList()
-
-        val preceding = usefulContextWords("lc").map { "$it $word" }
-        val following = usefulContextWords("rc").map { "$word $it" }
-
-        return (following + preceding)
-            .distinct()
-            .joinToString(", ")
+        // Do not present unverified word associations as collocations.
+        return ""
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -104,14 +82,14 @@ object OnlineDictionaryClient {
     private fun fetchOriginFromWiktionary(word: String): String {
         val encodedWord = URLEncoder.encode(word, "UTF-8")
         val url = URL(
-            "https://en.wiktionary.org/w/api.php?action=parse&page=$encodedWord&prop=wikitext&format=json&formatversion=2"
+            "https://en.wiktionary.org/w/api.php?action=parse&page=$encodedWord&prop=text&format=json&formatversion=2"
         )
         val connection = url.openConnection() as HttpURLConnection
 
         return try {
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
             connection.setRequestProperty(
                 "User-Agent",
                 "WordwiseDictionary/1.0 (educational dictionary app)"
@@ -126,36 +104,41 @@ object OnlineDictionaryClient {
                 .use { it.readText() }
 
             val root = json.parseToJsonElement(response).jsonObject
-            val wikitext = root["parse"]
+            val html = root["parse"]
                 ?.jsonObject
-                ?.get("wikitext")
+                ?.get("text")
                 ?.jsonPrimitive
                 ?.contentOrNull
                 ?: return ""
 
-            val etymology = Regex(
-                "(?is)==+\\s*Etymology\\s*==+\\s*(.*?)(?=\\n==+\\s*[^=]|$)"
-            ).find(wikitext)?.groupValues?.get(1) ?: return ""
+            val section = Regex(
+                """(?is)<h[2-6]\b[^>]*\bid=["']Etymology["'][^>]*>.*?</h[2-6]>(.*?)(?=<h[2-6]\b|$)"""
+            ).find(html)?.groupValues?.get(1) ?: return ""
 
-            etymology
-                .replace(Regex("<ref[^>]*>.*?</ref>", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("<ref[^>]*/>", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("\\[\\[([^]|]+)\\|([^]]+)]]"), "$2")
-                .replace(Regex("\\[\\[([^]]+)]]"), "$1")
-                .replace(Regex("'{2,5}"), "")
-                .replace(Regex("<[^>]+>"), "")
-                .replace(Regex("\\{\\{([^{}]*)}}")) { match ->
-                    val parts = match.groupValues[1].split("|")
-                    val preferred = parts.drop(1)
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() && !it.contains("=") }
-                        .lastOrNull()
-                    preferred ?: ""
+            val readable = section
+                .replace(Regex("(?is)<script\\b.*?</script>"), " ")
+                .replace(Regex("(?is)<style\\b.*?</style>"), " ")
+                .replace(Regex("(?is)<sup\\b.*?</sup>"), " ")
+                .replace(Regex("(?is)<[^>]+>"), " ")
+                .replace("&nbsp;", " ")
+                .replace("&#160;", " ")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace(Regex("&#(\\d+);")) { match ->
+                    match.groupValues[1].toIntOrNull()
+                        ?.let { Character.toString(it) } ?: ""
                 }
-                .replace(Regex("\\[\\[([^]]+)]]"), "$1")
+                .replace(Regex("&#x([0-9a-fA-F]+);")) { match ->
+                    match.groupValues[1].toIntOrNull(16)
+                        ?.let { Character.toString(it) } ?: ""
+                }
                 .replace(Regex("\\s+"), " ")
                 .trim()
-                .take(500)
+
+            readable.take(500)
         } catch (_: Exception) {
             ""
         } finally {
