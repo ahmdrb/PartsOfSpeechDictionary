@@ -709,10 +709,11 @@ fun DictionaryScreen(
                                     if (entry.notes.isNotBlank()) {
                                         Text("Personal Notes: ${entry.notes}")
                                     }
+                                    val familyEntries = findWordFamily(entry, allEntries)
                                     if (
+                                        familyEntries.isNotEmpty() ||
                                         entry.synonyms.isNotBlank() ||
-                                        entry.antonyms.isNotBlank() ||
-                                        entry.collocations.isNotBlank()
+                                        entry.antonyms.isNotBlank()
                                     ) {
                                         Text(
                                             "Word Relationships",
@@ -730,11 +731,23 @@ fun DictionaryScreen(
                                         words = entry.antonyms,
                                         onWordClick = vm::openRelatedWord
                                     )
-                                    WordRelationshipRow(
-                                        label = "Collocations",
-                                        words = entry.collocations,
-                                        onWordClick = vm::openRelatedWord
-                                    )
+                                    if (familyEntries.isNotEmpty()) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("Word Family", fontWeight = FontWeight.SemiBold)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth()
+                                                    .horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                familyEntries.forEach { related ->
+                                                    SuggestionChip(
+                                                        onClick = { vm.openRelatedWord(related.word) },
+                                                        label = { Text(related.word) }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
 
                                 if (vm.actionsEntryId == entry.id) {
@@ -1101,6 +1114,42 @@ fun DictionaryScreen(
     }
 }
 
+private fun findWordFamily(
+    entry: DictionaryEntry,
+    entries: List<DictionaryEntry>
+): List<DictionaryEntry> {
+    fun normalized(word: String): String =
+        word.lowercase().trim().replace(Regex("[^a-z]"), "")
+
+    fun familyKey(word: String): String {
+        val w = normalized(word)
+
+        // Explicit spelling variants in the decide family.
+        if (w in setOf(
+                "decide", "decides", "decided", "deciding",
+                "decision", "decisions", "decisive",
+                "decisively", "decisiveness"
+            )
+        ) {
+            return "decide-family"
+        }
+
+        // Only group explicitly recognized word-family members for now.
+        return w
+    }
+
+    val key = familyKey(entry.word)
+    if (key.isBlank()) return emptyList()
+
+    return entries
+        .asSequence()
+        .filter { it.id != entry.id }
+        .filter { familyKey(it.word) == key }
+        .distinctBy { it.id }
+        .sortedBy { it.word.lowercase() }
+        .toList()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WordRelationshipRow(
@@ -1140,10 +1189,6 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
     var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
     var synonyms by remember(initial) { mutableStateOf(initial?.synonyms.orEmpty()) }
     var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
-    var examples by remember(initial) { mutableStateOf(initial?.examples.orEmpty()) }
-    var collocations by remember(initial) { mutableStateOf(initial?.collocations.orEmpty()) }
-    var origin by remember(initial) { mutableStateOf(initial?.origin.orEmpty()) }
-    var translation by remember(initial) { mutableStateOf(initial?.translation.orEmpty()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Add dictionary entry" else "Edit entry") },
@@ -1158,10 +1203,6 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                 OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
                 OutlinedTextField(synonyms, { synonyms = it }, label = { Text("Synonyms (comma-separated)") })
                 OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
-                OutlinedTextField(collocations, { collocations = it }, label = { Text("Collocations (comma-separated)") })
-                OutlinedTextField(examples, { examples = it }, label = { Text("Examples") })
-                OutlinedTextField(origin, { origin = it }, label = { Text("Word origin") })
-                OutlinedTextField(translation, { translation = it }, label = { Text("Translation") })
                 OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
             }
         },
@@ -1171,16 +1212,16 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                     id = initial?.id ?: 0,
                     word = word,
                     definitions = definitions,
-                    examples = examples,
+                    examples = initial?.examples.orEmpty(),
                     categories = categories,
                     pronunciation = pronunciation,
                     notes = notes,
                     source = initial?.source ?: "User entry",
                     synonyms = synonyms,
                     antonyms = antonyms,
-                    collocations = collocations,
-                    origin = origin,
-                    translation = translation,
+                    collocations = initial?.collocations.orEmpty(),
+                    origin = initial?.origin.orEmpty(),
+                    translation = initial?.translation.orEmpty(),
                     updatedAt = initial?.updatedAt ?: System.currentTimeMillis(),
                 ))
             }) { Text("Save") }
