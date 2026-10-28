@@ -258,6 +258,18 @@ fun DictionaryScreen(
                                         .replace(Regex("[ \t]+"), " ")
                                     Text(cleanDefinitions, maxLines = 5)
                                 }
+                                if (entry.synonyms.isNotBlank()) {
+                                    Text("Synonyms: ${entry.synonyms}")
+                                }
+                                if (entry.antonyms.isNotBlank()) {
+                                    Text("Antonyms: ${entry.antonyms}")
+                                }
+                                if (entry.collocations.isNotBlank()) {
+                                    Text("Collocations: ${entry.collocations}")
+                                }
+                                if (entry.origin.isNotBlank()) {
+                                    Text("Origin: ${entry.origin}")
+                                }
                             }
                         }
                     }
@@ -351,6 +363,10 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
     var examples by remember(initial) { mutableStateOf(initial?.examples.orEmpty()) }
     var pronunciation by remember(initial) { mutableStateOf(initial?.pronunciation.orEmpty()) }
     var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
+    var synonyms by remember(initial) { mutableStateOf(initial?.synonyms.orEmpty()) }
+    var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
+    var collocations by remember(initial) { mutableStateOf(initial?.collocations.orEmpty()) }
+    var origin by remember(initial) { mutableStateOf(initial?.origin.orEmpty()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -365,6 +381,10 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                 OutlinedTextField(definitions, { definitions = it }, label = { Text("Definitions") })
                 OutlinedTextField(examples, { examples = it }, label = { Text("Examples") })
                 OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
+                OutlinedTextField(synonyms, { synonyms = it }, label = { Text("Synonyms (comma-separated)") })
+                OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
+                OutlinedTextField(collocations, { collocations = it }, label = { Text("Collocations") })
+                OutlinedTextField(origin, { origin = it }, label = { Text("Origin / etymology") })
                 OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
             }
         },
@@ -373,7 +393,9 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                 onSave(DictionaryEntry(
                     id = initial?.id ?: 0, word = word, definitions = definitions,
                     categories = categories, examples = examples, pronunciation = pronunciation,
-                    notes = notes, source = initial?.source ?: "User entry"
+                    notes = notes, source = initial?.source ?: "User entry",
+                    synonyms = synonyms, antonyms = antonyms,
+                    collocations = collocations, origin = origin
                 ))
             }) { Text("Save") }
         },

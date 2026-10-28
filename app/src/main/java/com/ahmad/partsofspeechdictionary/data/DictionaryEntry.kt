@@ -13,5 +13,9 @@ data class DictionaryEntry(
     val categories: String = "",
     val source: String = "User entry",
     val notes: String = "",
+    val synonyms: String = "",
+    val antonyms: String = "",
+    val collocations: String = "",
+    val origin: String = "",
     val updatedAt: Long = System.currentTimeMillis()
 )
