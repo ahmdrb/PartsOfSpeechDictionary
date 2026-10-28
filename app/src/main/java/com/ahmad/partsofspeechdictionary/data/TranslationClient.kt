@@ -9,6 +9,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
+data class TranslationLookupResult(
+    val text: String = "",
+    val status: String
+)
+
 object TranslationClient {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -16,8 +21,10 @@ object TranslationClient {
         text: String,
         targetLanguage: String,
         apiKey: String = ""
-    ): String {
-        if (text.isBlank() || targetLanguage.isBlank()) return ""
+    ): TranslationLookupResult {
+        if (text.isBlank() || targetLanguage.isBlank()) {
+            return TranslationLookupResult(status = "No word or language selected")
+        }
 
         val encodedWord = URLEncoder.encode(text.trim(), "UTF-8")
         val url = URL(
@@ -31,14 +38,23 @@ object TranslationClient {
             connection.readTimeout = 10000
             connection.setRequestProperty("Accept", "application/json")
 
-            if (connection.responseCode !in 200..299) return ""
+            val code = connection.responseCode
+
+            if (code !in 200..299) {
+                return TranslationLookupResult(
+                    status = "Translation service error (HTTP $code)"
+                )
+            }
 
             val response = connection.inputStream
                 .bufferedReader()
                 .use { it.readText() }
 
             val root = json.parseToJsonElement(response).jsonObject
-            val groups = root["translations"]?.jsonArray ?: return ""
+            val groups = root["translations"]?.jsonArray
+                ?: return TranslationLookupResult(
+                    status = "Translation data unavailable"
+                )
 
             val wantedCodes = when (targetLanguage.lowercase()) {
                 "zh" -> setOf("zh", "cmn", "zh-hans", "zh-hant")
@@ -57,6 +73,7 @@ object TranslationClient {
 
                 for (item in translations) {
                     val entry = item.jsonObject
+
                     val languageCode = (
                         entry["lang_code"]?.jsonPrimitive?.contentOrNull
                             ?: entry["code"]?.jsonPrimitive?.contentOrNull
@@ -88,19 +105,34 @@ object TranslationClient {
                             ?.let { "romanization: $it" }
                     ).joinToString("; ")
 
-                    val result = if (details.isNotBlank()) {
-                        "$translatedWord ($details)"
-                    } else {
-                        translatedWord
-                    }
-
-                    results.add(result)
+                    results.add(
+                        if (details.isNotBlank()) {
+                            "$translatedWord ($details)"
+                        } else {
+                            translatedWord
+                        }
+                    )
                 }
             }
 
-            results.distinct().joinToString("\n")
-        } catch (_: Exception) {
-            ""
+            val distinctResults = results.distinct()
+
+            if (distinctResults.isEmpty()) {
+                TranslationLookupResult(
+                    status = "No translation found for this language"
+                )
+            } else {
+                TranslationLookupResult(
+                    text = distinctResults.joinToString("\n"),
+                    status = "Translation found"
+                )
+            }
+        } catch (e: Exception) {
+            TranslationLookupResult(
+                status = "Translation request failed: ${
+                    e.message ?: e.javaClass.simpleName
+                }"
+            )
         } finally {
             connection.disconnect()
         }

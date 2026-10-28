@@ -68,6 +68,7 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var lookupError by mutableStateOf<String?>(null)
     var targetLanguage by mutableStateOf("id")
     var isTranslating by mutableStateOf(false)
+    var translationStatus by mutableStateOf("")
 
     val entries = repository.entries("").stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -81,17 +82,21 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             isLookingUp = true
             lookupError = null
             onlineResult = null
+            translationStatus = ""
             try {
                 val dictionaryResult = withContext(Dispatchers.IO) {
                     OnlineDictionaryClient.lookup(word)
                 }
-                val translatedWord = withContext(Dispatchers.IO) {
+                val translationResult = withContext(Dispatchers.IO) {
                     TranslationClient.translate(
                         text = dictionaryResult.word,
                         targetLanguage = targetLanguage
                     )
                 }
-                onlineResult = dictionaryResult.copy(translation = translatedWord)
+                translationStatus = translationResult.status
+                onlineResult = dictionaryResult.copy(
+                    translation = translationResult.text
+                )
             } catch (e: Exception) {
                 lookupError = e.message ?: "Lookup failed. Check your internet connection."
             } finally {
@@ -404,6 +409,11 @@ fun DictionaryScreen(
                         Text(
                             "Translation (${vm.targetLanguage}): ${result.translation}",
                             style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else if (vm.translationStatus.isNotBlank()) {
+                        Text(
+                            "Translation status: ${vm.translationStatus}",
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                     if (result.synonyms.isNotBlank()) {
