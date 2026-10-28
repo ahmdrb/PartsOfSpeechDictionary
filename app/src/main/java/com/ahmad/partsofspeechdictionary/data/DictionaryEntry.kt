@@ -17,5 +17,6 @@ data class DictionaryEntry(
     val antonyms: String = "",
     val collocations: String = "",
     val origin: String = "",
+    val translation: String = "",
     val updatedAt: Long = System.currentTimeMillis()
 )

@@ -20,7 +20,11 @@ data class OnlineDefinition(
 data class OnlineDictionaryResult(
     val word: String,
     val pronunciation: String,
-    val definitions: List<OnlineDefinition>
+    val definitions: List<OnlineDefinition>,
+    val synonyms: String = "",
+    val antonyms: String = "",
+    val origin: String = "",
+    val translation: String = ""
 )
 
 object OnlineDictionaryClient {
@@ -63,7 +67,18 @@ object OnlineDictionaryClient {
 
             val entries = json.parseToJsonElement(response).jsonArray
             val definitions = mutableListOf<OnlineDefinition>()
+            val synonyms = linkedSetOf<String>()
+            val antonyms = linkedSetOf<String>()
             var pronunciation = ""
+            var origin = ""
+
+            fun readWords(value: kotlinx.serialization.json.JsonElement?, target: MutableSet<String>) {
+                val array = value as? JsonArray ?: return
+                array.forEach { item ->
+                    val wordValue = item.jsonPrimitive.contentOrNull.orEmpty().trim()
+                    if (wordValue.isNotBlank()) target.add(wordValue)
+                }
+            }
 
             for (entry in entries) {
                 val obj = entry.jsonObject
@@ -75,10 +90,24 @@ object OnlineDictionaryClient {
                         .orEmpty()
                 }
 
+                if (origin.isBlank()) {
+                    origin = obj["origin"]
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                        .orEmpty()
+                }
+
+                readWords(obj["synonyms"], synonyms)
+                readWords(obj["antonyms"], antonyms)
+
                 val meanings = obj["meanings"] as? JsonArray ?: continue
 
                 for (meaningElement in meanings) {
                     val meaning = meaningElement.jsonObject
+
+                    readWords(meaning["synonyms"], synonyms)
+                    readWords(meaning["antonyms"], antonyms)
+
                     val partOfSpeech = meaning["partOfSpeech"]
                         ?.jsonPrimitive
                         ?.contentOrNull
@@ -88,8 +117,7 @@ object OnlineDictionaryClient {
                         meaning["definitions"] as? JsonArray ?: continue
 
                     for (definitionElement in definitionArray) {
-                        val definitionObject =
-                            definitionElement.jsonObject
+                        val definitionObject = definitionElement.jsonObject
 
                         val definition = definitionObject["definition"]
                             ?.jsonPrimitive
@@ -100,6 +128,9 @@ object OnlineDictionaryClient {
                             ?.jsonPrimitive
                             ?.contentOrNull
                             .orEmpty()
+
+                        readWords(definitionObject["synonyms"], synonyms)
+                        readWords(definitionObject["antonyms"], antonyms)
 
                         if (definition.isNotBlank()) {
                             definitions.add(
@@ -123,7 +154,10 @@ object OnlineDictionaryClient {
             return OnlineDictionaryResult(
                 word = cleanedWord,
                 pronunciation = pronunciation,
-                definitions = definitions
+                definitions = definitions,
+                synonyms = synonyms.joinToString(", "),
+                antonyms = antonyms.joinToString(", "),
+                origin = origin
             )
         } finally {
             connection.disconnect()

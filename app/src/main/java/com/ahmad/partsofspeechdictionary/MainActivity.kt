@@ -66,6 +66,8 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var onlineResult by mutableStateOf<OnlineDictionaryResult?>(null)
     var isLookingUp by mutableStateOf(false)
     var lookupError by mutableStateOf<String?>(null)
+    var targetLanguage by mutableStateOf("id")
+    var isTranslating by mutableStateOf(false)
 
     val entries = repository.entries("").stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -80,9 +82,16 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             lookupError = null
             onlineResult = null
             try {
-                onlineResult = withContext(Dispatchers.IO) {
+                val dictionaryResult = withContext(Dispatchers.IO) {
                     OnlineDictionaryClient.lookup(word)
                 }
+                val translatedWord = withContext(Dispatchers.IO) {
+                    TranslationClient.translate(
+                        text = dictionaryResult.word,
+                        targetLanguage = targetLanguage
+                    )
+                }
+                onlineResult = dictionaryResult.copy(translation = translatedWord)
             } catch (e: Exception) {
                 lookupError = e.message ?: "Lookup failed. Check your internet connection."
             } finally {
@@ -115,6 +124,10 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             examples = examples,
             pronunciation = result.pronunciation,
             categories = categories,
+            synonyms = result.synonyms,
+            antonyms = result.antonyms,
+            origin = result.origin,
+            translation = result.translation,
             source = "Free Dictionary API"
         ))
         onlineResult = null
@@ -163,6 +176,55 @@ fun DictionaryScreen(
                 label = { Text("Search words and definitions") },
                 singleLine = true
             )
+            Spacer(Modifier.height(8.dp))
+            var languageMenuExpanded by remember { mutableStateOf(false) }
+            val languages = listOf(
+                "Indonesian" to "id",
+                "Spanish" to "es",
+                "French" to "fr",
+                "German" to "de",
+                "Japanese" to "ja",
+                "Chinese" to "zh",
+                "Korean" to "ko",
+                "Arabic" to "ar",
+                "Hindi" to "hi",
+                "Portuguese" to "pt",
+                "Russian" to "ru",
+                "Italian" to "it"
+            )
+            ExposedDropdownMenuBox(
+                expanded = languageMenuExpanded,
+                onExpandedChange = { languageMenuExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = languages.firstOrNull { it.second == vm.targetLanguage }?.first
+                        ?: vm.targetLanguage,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Translate word to") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(
+                            expanded = languageMenuExpanded
+                        )
+                    },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = languageMenuExpanded,
+                    onDismissRequest = { languageMenuExpanded = false }
+                ) {
+                    languages.forEach { (name, code) ->
+                        DropdownMenuItem(
+                            text = { Text(name) },
+                            onClick = {
+                                vm.targetLanguage = code
+                                languageMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(4.dp))
             Button(
                 onClick = { vm.lookupOnline() },
@@ -278,6 +340,9 @@ fun DictionaryScreen(
                                 if (entry.origin.isNotBlank()) {
                                     Text("Origin: ${entry.origin}")
                                 }
+                                if (entry.translation.isNotBlank()) {
+                                    Text("Translation: ${entry.translation}")
+                                }
                             }
                         }
                     }
@@ -333,6 +398,30 @@ fun DictionaryScreen(
                                 )
                             }
                         }
+                    }
+                    if (result.translation.isNotBlank()) {
+                        Text(
+                            "Translation (${vm.targetLanguage}): ${result.translation}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    if (result.synonyms.isNotBlank()) {
+                        Text(
+                            "Synonyms: ${result.synonyms}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (result.antonyms.isNotBlank()) {
+                        Text(
+                            "Antonyms: ${result.antonyms}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (result.origin.isNotBlank()) {
+                        Text(
+                            "Origin: ${result.origin}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                     Text(
                         "Source: Free Dictionary API",
