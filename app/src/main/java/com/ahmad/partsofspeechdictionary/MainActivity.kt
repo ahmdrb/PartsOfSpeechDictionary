@@ -118,21 +118,13 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
             }
             .joinToString("\n")
 
-        val examples = result.definitions
-            .filter { it.example.isNotBlank() }
-            .distinctBy { it.example }
-            .joinToString("\n") { "• ${it.example}" }
-
         save(DictionaryEntry(
             word = result.word,
             definitions = definitions,
-            examples = examples,
             pronunciation = result.pronunciation,
             categories = categories,
             synonyms = result.synonyms,
             antonyms = result.antonyms,
-            collocations = result.collocations,
-            origin = result.origin,
             translation = result.translation,
             source = "Free Dictionary API + Datamuse"
         ))
@@ -326,10 +318,6 @@ fun DictionaryScreen(
                                         .replace(Regex("[ \t]+"), " ")
                                     Text(cleanDefinitions, maxLines = 5)
                                 }
-                                if (entry.examples.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text("Examples: ${entry.examples}")
-                                }
                                 if (entry.notes.isNotBlank()) {
                                     Spacer(Modifier.height(4.dp))
                                     Text("Personal Notes: ${entry.notes}")
@@ -339,12 +327,6 @@ fun DictionaryScreen(
                                 }
                                 if (entry.antonyms.isNotBlank()) {
                                     Text("Antonyms: ${entry.antonyms}")
-                                }
-                                if (entry.collocations.isNotBlank()) {
-                                    Text("Collocations: ${entry.collocations}")
-                                }
-                                if (entry.origin.isNotBlank()) {
-                                    Text("Origin: ${entry.origin}")
                                 }
                                 if (entry.translation.isNotBlank()) {
                                     Text("Translation: ${entry.translation}")
@@ -397,12 +379,6 @@ fun DictionaryScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(item.definition)
-                            if (item.example.isNotBlank()) {
-                                Text(
-                                    "Example: ${item.example}",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
                         }
                     }
                     if (result.translation.isNotBlank()) {
@@ -428,19 +404,7 @@ fun DictionaryScreen(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    if (result.collocations.isNotBlank()) {
-                        Text(
-                            "Possible word combinations: ${result.collocations}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
 
-                    if (result.origin.isNotBlank()) {
-                        Text(
-                            "Origin: ${result.origin}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
                     Text(
                         "Source: Free Dictionary API",
                         style = MaterialTheme.typography.labelSmall
@@ -475,13 +439,10 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
     var word by remember(initial) { mutableStateOf(initial?.word.orEmpty()) }
     var definitions by remember(initial) { mutableStateOf(initial?.definitions.orEmpty()) }
     var categories by remember(initial) { mutableStateOf(initial?.categories.orEmpty()) }
-    var examples by remember(initial) { mutableStateOf(initial?.examples.orEmpty()) }
     var pronunciation by remember(initial) { mutableStateOf(initial?.pronunciation.orEmpty()) }
     var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
     var synonyms by remember(initial) { mutableStateOf(initial?.synonyms.orEmpty()) }
     var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
-    var collocations by remember(initial) { mutableStateOf(initial?.collocations.orEmpty()) }
-    var origin by remember(initial) { mutableStateOf(initial?.origin.orEmpty()) }
     var translation by remember(initial) {
     mutableStateOf(initial?.translation.orEmpty())
 }
@@ -496,12 +457,9 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                     label = { Text("Parts of speech (comma-separated)") },
                     supportingText = { Text("Example: Noun, Verb") })
                 OutlinedTextField(definitions, { definitions = it }, label = { Text("Definitions") })
-                OutlinedTextField(examples, { examples = it }, label = { Text("Examples") })
                 OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
                 OutlinedTextField(synonyms, { synonyms = it }, label = { Text("Synonyms (comma-separated)") })
                 OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
-                OutlinedTextField(collocations, { collocations = it }, label = { Text("Collocations") })
-                OutlinedTextField(origin, { origin = it }, label = { Text("Origin / etymology") })
                 OutlinedTextField(
     value = translation,
     onValueChange = { translation = it },
@@ -518,14 +476,11 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                     word = word,
                     definitions = definitions,
                     categories = categories,
-                    examples = examples,
                     pronunciation = pronunciation,
                     notes = notes,
                     source = initial?.source ?: "User entry",
                     synonyms = synonyms,
                     antonyms = antonyms,
-                    collocations = collocations,
-                    origin = origin,
                     translation = translation
                 ))
             }) { Text("Save") }

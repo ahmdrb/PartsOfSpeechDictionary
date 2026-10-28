@@ -72,79 +72,7 @@ object OnlineDictionaryClient {
         }
     }
 
-    private fun fetchCollocations(word: String): String {
-        // Do not present unverified word associations as collocations.
-        return ""
-    }
-
     private val json = Json { ignoreUnknownKeys = true }
-
-    private fun fetchOriginFromWiktionary(word: String): String {
-        val encodedWord = URLEncoder.encode(word, "UTF-8")
-        val url = URL(
-            "https://en.wiktionary.org/w/api.php?action=parse&page=$encodedWord&prop=text&format=json&formatversion=2"
-        )
-        val connection = url.openConnection() as HttpURLConnection
-
-        return try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
-            connection.setRequestProperty(
-                "User-Agent",
-                "WordwiseDictionary/1.0 (educational dictionary app)"
-            )
-
-            if (connection.responseCode !in 200..299) {
-                return ""
-            }
-
-            val response = connection.inputStream
-                .bufferedReader()
-                .use { it.readText() }
-
-            val root = json.parseToJsonElement(response).jsonObject
-            val html = root["parse"]
-                ?.jsonObject
-                ?.get("text")
-                ?.jsonPrimitive
-                ?.contentOrNull
-                ?: return ""
-
-            val section = Regex(
-                """(?is)<h[2-6]\b[^>]*\bid=["']Etymology["'][^>]*>.*?</h[2-6]>(.*?)(?=<h[2-6]\b|$)"""
-            ).find(html)?.groupValues?.get(1) ?: return ""
-
-            val readable = section
-                .replace(Regex("(?is)<script\\b.*?</script>"), " ")
-                .replace(Regex("(?is)<style\\b.*?</style>"), " ")
-                .replace(Regex("(?is)<sup\\b.*?</sup>"), " ")
-                .replace(Regex("(?is)<[^>]+>"), " ")
-                .replace("&nbsp;", " ")
-                .replace("&#160;", " ")
-                .replace("&amp;", "&")
-                .replace("&quot;", "\"")
-                .replace("&#39;", "'")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace(Regex("&#(\\d+);")) { match ->
-                    match.groupValues[1].toIntOrNull()
-                        ?.let { Character.toString(it) } ?: ""
-                }
-                .replace(Regex("&#x([0-9a-fA-F]+);")) { match ->
-                    match.groupValues[1].toIntOrNull(16)
-                        ?.let { Character.toString(it) } ?: ""
-                }
-                .replace(Regex("\\s+"), " ")
-                .trim()
-
-            readable.take(500)
-        } catch (_: Exception) {
-            ""
-        } finally {
-            connection.disconnect()
-        }
-    }
 
     fun lookup(word: String): OnlineDictionaryResult {
         val cleanedWord = word.trim()
@@ -186,7 +114,6 @@ object OnlineDictionaryClient {
             val synonyms = linkedSetOf<String>()
             val antonyms = linkedSetOf<String>()
             var pronunciation = ""
-            var origin = ""
 
             fun readWords(value: kotlinx.serialization.json.JsonElement?, target: MutableSet<String>) {
                 val array = value as? JsonArray ?: return
@@ -217,13 +144,6 @@ object OnlineDictionaryClient {
                             }
                             .orEmpty()
                     }
-                }
-
-                if (origin.isBlank()) {
-                    origin = obj["origin"]
-                        ?.jsonPrimitive
-                        ?.contentOrNull
-                        .orEmpty()
                 }
 
                 readWords(obj["synonyms"], synonyms)
@@ -296,10 +216,6 @@ object OnlineDictionaryClient {
                 definitions = definitions,
                 synonyms = synonyms.joinToString(", "),
                 antonyms = antonyms.joinToString(", "),
-                origin = origin.ifBlank {
-                    fetchOriginFromWiktionary(cleanedWord)
-                },
-                collocations = fetchCollocations(cleanedWord)
             )
         } finally {
             connection.disconnect()
