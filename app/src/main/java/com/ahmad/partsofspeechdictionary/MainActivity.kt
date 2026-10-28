@@ -688,7 +688,7 @@ fun DictionaryScreen(
                                 ) {
                                     Text(
                                         entry.word,
-                                        modifier = Modifier.weight(1f),
+                                        modifier = if (vm.expandedEntryId == entry.id) Modifier else Modifier.weight(1f),
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
