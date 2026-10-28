@@ -682,11 +682,25 @@ fun DictionaryScreen(
                                 modifier = Modifier.fillMaxWidth().padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    entry.word,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        entry.word,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    IconButton(
+                                        onClick = { pronunciationHelper.speak(entry.word) }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.VolumeUp,
+                                            contentDescription = "Play pronunciation"
+                                        )
+                                    }
+                                }
 
                                 if (vm.expandedEntryId == entry.id) {
                                     if (entry.categories.isNotBlank()) {
