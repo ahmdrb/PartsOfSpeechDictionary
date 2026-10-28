@@ -33,6 +33,19 @@ interface DictionaryDao {
     @Query("SELECT * FROM word_collections ORDER BY name COLLATE NOCASE")
     fun observeCollections(): Flow<List<WordCollection>>
 
+    @Query("""
+        SELECT wc.id, wc.name, COUNT(DISTINCT x.entryId) AS wordCount
+        FROM word_collections wc
+        LEFT JOIN entry_collection_cross_ref x
+            ON wc.id = x.collectionId
+        GROUP BY wc.id, wc.name
+        ORDER BY wc.name COLLATE NOCASE
+    """)
+    fun observeCollectionsWithCounts(): Flow<List<CollectionWithCount>>
+
+    @Query("SELECT COUNT(*) FROM dictionary_entries")
+    fun observeEntryCount(): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertCollection(collection: WordCollection): Long
 

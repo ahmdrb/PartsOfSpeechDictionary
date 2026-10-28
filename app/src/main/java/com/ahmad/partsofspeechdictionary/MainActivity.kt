@@ -88,6 +88,14 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
 
+    val collectionCounts = repository.collectionsWithCounts().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+
+    val allWordCount = repository.entryCount().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), 0
+    )
+
     val entries = selectedCollectionFlow.flatMapLatest { collectionId ->
         if (collectionId == null) repository.entries("")
         else repository.entriesInCollection(collectionId)
@@ -350,19 +358,59 @@ fun DictionaryScreen(
             Text("Collections", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
             val collections by vm.collections.collectAsStateWithLifecycle()
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                FilterChip(
-                    selected = vm.selectedCollectionId == null,
-                    onClick = { vm.selectCollection(null) },
-                    label = { Text("All words") }
-                )
-                collections.forEach { collection ->
-                    Spacer(Modifier.width(6.dp))
-                    FilterChip(
-                        selected = vm.selectedCollectionId == collection.id,
-                        onClick = { vm.selectCollection(collection.id) },
-                        label = { Text(collection.name) }
+            val collectionCounts by vm.collectionCounts.collectAsStateWithLifecycle()
+            val allWordCount by vm.allWordCount.collectAsStateWithLifecycle()
+
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ElevatedCard(
+                    modifier = Modifier
+                        .widthIn(min = 112.dp, max = 190.dp)
+                        .clickable { vm.selectCollection(null) },
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = if (vm.selectedCollectionId == null)
+                            MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surface
                     )
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("All words", fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "$allWordCount ${if (allWordCount == 1) "word" else "words"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                collectionCounts.forEach { collection ->
+                    ElevatedCard(
+                        modifier = Modifier
+                            .widthIn(min = 132.dp, max = 210.dp)
+                            .clickable { vm.selectCollection(collection.id) },
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = if (vm.selectedCollectionId == collection.id)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                collection.name,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "${collection.wordCount} ${if (collection.wordCount == 1) "word" else "words"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
             Row(

@@ -14,6 +14,11 @@ class DictionaryRepository(private val dao: DictionaryDao) {
 
     fun collections(): Flow<List<WordCollection>> = dao.observeCollections()
 
+    fun collectionsWithCounts(): Flow<List<CollectionWithCount>> =
+        dao.observeCollectionsWithCounts()
+
+    fun entryCount(): Flow<Int> = dao.observeEntryCount()
+
     fun collectionsForEntry(entryId: Long): Flow<List<WordCollection>> =
         dao.observeCollectionsForEntry(entryId)
 
