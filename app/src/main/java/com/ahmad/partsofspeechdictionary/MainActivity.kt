@@ -464,7 +464,9 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
     var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
     var collocations by remember(initial) { mutableStateOf(initial?.collocations.orEmpty()) }
     var origin by remember(initial) { mutableStateOf(initial?.origin.orEmpty()) }
-
+    var translation by remember(initial) {
+    mutableStateOf(initial?.translation.orEmpty())
+}
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Add dictionary entry" else "Edit entry") },
@@ -482,17 +484,31 @@ fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (Dicti
                 OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
                 OutlinedTextField(collocations, { collocations = it }, label = { Text("Collocations") })
                 OutlinedTextField(origin, { origin = it }, label = { Text("Origin / etymology") })
+                OutlinedTextField(
+    value = translation,
+    onValueChange = { translation = it },
+    label = { Text("Translation") },
+    supportingText = { Text("Enter the meaning in your selected language") }
+)
                 OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
             }
         },
         confirmButton = {
             TextButton(enabled = word.isNotBlank(), onClick = {
                 onSave(DictionaryEntry(
-                    id = initial?.id ?: 0, word = word, definitions = definitions,
-                    categories = categories, examples = examples, pronunciation = pronunciation,
-                    notes = notes, source = initial?.source ?: "User entry",
-                    synonyms = synonyms, antonyms = antonyms,
-                    collocations = collocations, origin = origin
+                    id = initial?.id ?: 0,
+                    word = word,
+                    definitions = definitions,
+                    categories = categories,
+                    examples = examples,
+                    pronunciation = pronunciation,
+                    notes = notes,
+                    source = initial?.source ?: "User entry",
+                    synonyms = synonyms,
+                    antonyms = antonyms,
+                    collocations = collocations,
+                    origin = origin,
+                    translation = translation
                 ))
             }) { Text("Save") }
         },
