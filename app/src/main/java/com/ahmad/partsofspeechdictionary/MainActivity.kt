@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -174,9 +175,15 @@ fun DictionaryScreen(
                 modifier = Modifier.fillMaxWidth(),
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 label = { Text("Search words and definitions") },
+                trailingIcon = {
+                    if (vm.query.isNotEmpty()) {
+                        IconButton(onClick = { vm.query = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        }
+                    }
+                },
                 singleLine = true
             )
-            Spacer(Modifier.height(8.dp))
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { vm.lookupOnline() },
@@ -217,7 +224,13 @@ fun DictionaryScreen(
                         label = { Text(category) })
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "${visible.size} ${if (visible.size == 1) "word" else "words"} found",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
             if (visible.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
