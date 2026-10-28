@@ -1,6 +1,10 @@
 package com.ahmad.partsofspeechdictionary
 
 import android.os.Bundle
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.horizontalScroll
@@ -50,7 +54,7 @@ class MainActivity : ComponentActivity() {
                 val vm: DictionaryViewModel = viewModel(factory = object : ViewModelProvider.Factory {
                     @Suppress("UNCHECKED_CAST")
                     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                        DictionaryViewModel(repository) as T
+                        DictionaryViewModel(repository, DictionaryBackupManager(db)) as T
                 })
                 DictionaryScreen(vm, pronunciationHelper)
             }
@@ -63,7 +67,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-class DictionaryViewModel(private val repository: DictionaryRepository) : ViewModel() {
+class DictionaryViewModel(
+    private val repository: DictionaryRepository,
+    private val backupManager: DictionaryBackupManager
+) : ViewModel() {
     var query by mutableStateOf("")
     var selectedCategory by mutableStateOf<String?>(null)
     var showEditor by mutableStateOf(false)
@@ -81,6 +88,15 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var collectionName by mutableStateOf("")
     var collectionError by mutableStateOf<String?>(null)
     var collectionToDelete by mutableStateOf<WordCollection?>(null)
+
+    var backupJson by mutableStateOf<String?>(null)
+        private set
+    var backupMessage by mutableStateOf<String?>(null)
+        private set
+    var backupError by mutableStateOf<String?>(null)
+        private set
+    var isBackupBusy by mutableStateOf(false)
+        private set
 
     private val selectedCollectionFlow = MutableStateFlow<Long?>(null)
 
@@ -264,6 +280,50 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
         }
     }
 
+    fun prepareBackupExport() {
+        viewModelScope.launch {
+            isBackupBusy = true
+            backupError = null
+            backupMessage = null
+            try {
+                backupJson = withContext(Dispatchers.IO) { backupManager.exportJson() }
+            } catch (e: Exception) {
+                backupError = e.message ?: "Could not create backup."
+            } finally {
+                isBackupBusy = false
+            }
+        }
+    }
+
+    fun clearPreparedBackup() {
+        backupJson = null
+    }
+
+    fun importBackup(json: String, mode: DictionaryBackupManager.ImportMode) {
+        viewModelScope.launch {
+            isBackupBusy = true
+            backupError = null
+            backupMessage = null
+            try {
+                withContext(Dispatchers.IO) { backupManager.importJson(json, mode) }
+                backupMessage = if (mode == DictionaryBackupManager.ImportMode.MERGE) {
+                    "Backup merged successfully."
+                } else {
+                    "Backup restored successfully."
+                }
+            } catch (e: Exception) {
+                backupError = e.message ?: "Could not import backup. No successful import was completed."
+            } finally {
+                isBackupBusy = false
+            }
+        }
+    }
+
+    fun clearBackupStatus() {
+        backupMessage = null
+        backupError = null
+    }
+
     fun save(entry: DictionaryEntry) {
         viewModelScope.launch { repository.save(entry); showEditor = false; selectedEntry = null }
     }
@@ -284,14 +344,96 @@ fun DictionaryScreen(
         })
     }
 
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exportUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingImportJson by remember { mutableStateOf<String?>(null) }
+    var showImportOptions by remember { mutableStateOf(false) }
+    var confirmReplace by remember { mutableStateOf(false) }
+    var backupUiMessage by remember { mutableStateOf<String?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            exportUri = uri
+            vm.clearPreparedBackup()
+            vm.prepareBackupExport()
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val json = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
+                            ?: error("Could not open the selected file.")
+                    }
+                    pendingImportJson = json
+                    showImportOptions = true
+                    backupUiMessage = null
+                    vm.clearBackupStatus()
+                } catch (e: Exception) {
+                    backupUiMessage = "Import failed: ${e.message ?: "Could not read file."}"
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(vm.backupJson, exportUri) {
+        val json = vm.backupJson
+        val uri = exportUri
+        if (json != null && uri != null) {
+            try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)
+                        ?.bufferedWriter(Charsets.UTF_8)
+                        ?.use { it.write(json) }
+                        ?: error("Could not write to the selected file.")
+                }
+                backupUiMessage = "Backup exported successfully."
+            } catch (e: Exception) {
+                backupUiMessage = "Export failed: ${e.message ?: "Could not write file."}"
+            } finally {
+                exportUri = null
+                vm.clearPreparedBackup()
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(title = {
-                Column {
-                    Text("Wordwise", fontWeight = FontWeight.Bold)
-                    Text("Parts of Speech Dictionary", style = MaterialTheme.typography.labelSmall)
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Wordwise", fontWeight = FontWeight.Bold)
+                        Text("Parts of Speech Dictionary", style = MaterialTheme.typography.labelSmall)
+                    }
+                },
+                actions = {
+                    TextButton(
+                        enabled = !vm.isBackupBusy,
+                        onClick = {
+                            backupUiMessage = null
+                            vm.clearBackupStatus()
+                            exportLauncher.launch("wordwise-backup.json")
+                        }
+                    ) { Text("Export") }
+                    TextButton(
+                        enabled = !vm.isBackupBusy,
+                        onClick = {
+                            backupUiMessage = null
+                            vm.clearBackupStatus()
+                            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                        }
+                    ) { Text("Import") }
                 }
-            })
+            )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { vm.selectedEntry = null; vm.showEditor = true }) {
@@ -300,6 +442,22 @@ fun DictionaryScreen(
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+            val statusMessage = backupUiMessage ?: vm.backupMessage
+            val errorMessage = vm.backupError
+
+            if (statusMessage != null) {
+                Text(statusMessage, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(4.dp))
+            }
+            if (errorMessage != null) {
+                Text(errorMessage, color = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.height(4.dp))
+            }
+            if (vm.isBackupBusy) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Spacer(Modifier.height(4.dp))
+            }
+
             OutlinedTextField(
                 value = vm.query, onValueChange = { vm.query = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -746,6 +904,85 @@ fun DictionaryScreen(
                 TextButton(onClick = {
                     vm.showManageCollectionsDialog = false
                     vm.manageCollectionsEntry = null
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showImportOptions && pendingImportJson != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showImportOptions = false
+                pendingImportJson = null
+            },
+            title = { Text("Import backup") },
+            text = {
+                Text(
+                    "Merge adds missing words and collections while preserving existing words. " +
+                    "Replace removes the current dictionary data before restoring this backup."
+                )
+            },
+            confirmButton = {
+                Row {
+                    TextButton(
+                        enabled = !vm.isBackupBusy,
+                        onClick = {
+                            val json = pendingImportJson
+                            if (json != null) {
+                                vm.importBackup(json, DictionaryBackupManager.ImportMode.MERGE)
+                            }
+                            showImportOptions = false
+                            pendingImportJson = null
+                        }
+                    ) { Text("Merge") }
+                    TextButton(
+                        enabled = !vm.isBackupBusy,
+                        onClick = {
+                            showImportOptions = false
+                            confirmReplace = true
+                        }
+                    ) { Text("Replace…") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportOptions = false
+                    pendingImportJson = null
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (confirmReplace && pendingImportJson != null) {
+        AlertDialog(
+            onDismissRequest = { confirmReplace = false },
+            title = { Text("Replace dictionary?") },
+            text = {
+                Text(
+                    "This will replace the current words, collections, and collection links " +
+                    "with the selected backup. This action cannot be undone unless you have " +
+                    "another backup."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !vm.isBackupBusy,
+                    onClick = {
+                        val json = pendingImportJson
+                        if (json != null) {
+                            vm.importBackup(json, DictionaryBackupManager.ImportMode.REPLACE)
+                        }
+                        confirmReplace = false
+                        pendingImportJson = null
+                    }
+                ) { Text("Confirm replace") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    confirmReplace = false
+                    pendingImportJson = null
                 }) {
                     Text("Cancel")
                 }

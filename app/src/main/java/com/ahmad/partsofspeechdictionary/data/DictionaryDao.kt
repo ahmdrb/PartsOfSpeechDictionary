@@ -10,6 +10,25 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface DictionaryDao {
+
+    @Query("SELECT * FROM dictionary_entries")
+    suspend fun getAllEntriesForBackup(): List<DictionaryEntry>
+
+    @Query("SELECT * FROM word_collections")
+    suspend fun getAllCollectionsForBackup(): List<WordCollection>
+
+    @Query("SELECT * FROM entry_collection_cross_ref")
+    suspend fun getAllMembershipsForBackup(): List<EntryCollectionCrossRef>
+
+    @Query("DELETE FROM entry_collection_cross_ref")
+    suspend fun clearAllMembershipsForBackup()
+
+    @Query("DELETE FROM dictionary_entries")
+    suspend fun clearAllEntriesForBackup()
+
+    @Query("DELETE FROM word_collections")
+    suspend fun clearAllCollectionsForBackup()
+
     @Query("SELECT * FROM dictionary_entries ORDER BY word COLLATE NOCASE")
     fun observeAll(): Flow<List<DictionaryEntry>>
 
