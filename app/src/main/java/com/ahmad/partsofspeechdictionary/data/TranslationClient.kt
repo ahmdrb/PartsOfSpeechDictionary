@@ -1,10 +1,10 @@
 package com.ahmad.partsofspeechdictionary.data
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -19,82 +19,16 @@ object TranslationClient {
     ): String {
         if (text.isBlank() || targetLanguage.isBlank()) return ""
 
-        val libreResult = translateWithLibreTranslate(
-            text,
-            targetLanguage,
-            apiKey
-        )
-
-        if (libreResult.isNotBlank()) return libreResult
-
-        return translateWithMyMemory(text, targetLanguage)
-    }
-
-    private fun translateWithLibreTranslate(
-        text: String,
-        targetLanguage: String,
-        apiKey: String
-    ): String {
-        val connection = URL("https://libretranslate.com/translate")
-            .openConnection() as HttpURLConnection
-
-        return try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.doOutput = true
-            connection.setRequestProperty(
-                "Content-Type",
-                "application/json; charset=UTF-8"
-            )
-            connection.setRequestProperty("Accept", "application/json")
-
-            val body = buildJsonObject {
-                put("q", text)
-                put("source", "en")
-                put("target", targetLanguage)
-                put("format", "text")
-                if (apiKey.isNotBlank()) put("api_key", apiKey)
-            }.toString()
-
-            connection.outputStream.use {
-                it.write(body.toByteArray(Charsets.UTF_8))
-            }
-
-            if (connection.responseCode !in 200..299) return ""
-
-            val response = connection.inputStream
-                .bufferedReader()
-                .use { it.readText() }
-
-            json.parseToJsonElement(response)
-                .jsonObject["translatedText"]
-                ?.jsonPrimitive
-                ?.content
-                ?.trim()
-                .orEmpty()
-        } catch (_: Exception) {
-            ""
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun translateWithMyMemory(
-        text: String,
-        targetLanguage: String
-    ): String {
-        val query = URLEncoder.encode(text, "UTF-8")
-        val languagePair = URLEncoder.encode("en|$targetLanguage", "UTF-8")
+        val encodedWord = URLEncoder.encode(text.trim(), "UTF-8")
         val url = URL(
-            "https://api.mymemory.translated.net/get?q=$query&langpair=$languagePair"
+            "https://api.wiktapi.dev/v1/en/word/$encodedWord/translations"
         )
         val connection = url.openConnection() as HttpURLConnection
 
         return try {
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
             connection.setRequestProperty("Accept", "application/json")
 
             if (connection.responseCode !in 200..299) return ""
@@ -104,21 +38,67 @@ object TranslationClient {
                 .use { it.readText() }
 
             val root = json.parseToJsonElement(response).jsonObject
-            val status = root["responseStatus"]
-                ?.jsonPrimitive
-                ?.content
-                ?: return ""
+            val groups = root["translations"]?.jsonArray ?: return ""
 
-            if (status != "200") return ""
+            val wantedCodes = when (targetLanguage.lowercase()) {
+                "zh" -> setOf("zh", "cmn", "zh-hans", "zh-hant")
+                else -> setOf(targetLanguage.lowercase())
+            }
 
-            root["responseData"]
-                ?.jsonObject
-                ?.get("translatedText")
-                ?.jsonPrimitive
-                ?.content
-                ?.trim()
-                ?.takeIf { it.isNotBlank() && !it.equals(text, ignoreCase = true) }
-                .orEmpty()
+            val results = mutableListOf<String>()
+
+            for (group in groups) {
+                val groupObject = group.jsonObject
+                val partOfSpeech = groupObject["pos"]
+                    ?.jsonPrimitive?.contentOrNull.orEmpty()
+
+                val translations = groupObject["translations"]?.jsonArray
+                    ?: continue
+
+                for (item in translations) {
+                    val entry = item.jsonObject
+                    val languageCode = (
+                        entry["lang_code"]?.jsonPrimitive?.contentOrNull
+                            ?: entry["code"]?.jsonPrimitive?.contentOrNull
+                        ).orEmpty().lowercase()
+
+                    if (languageCode !in wantedCodes) continue
+
+                    val translatedWord = entry["word"]
+                        ?.jsonPrimitive?.contentOrNull
+                        ?.trim()
+                        .orEmpty()
+
+                    if (translatedWord.isBlank()) continue
+
+                    val sense = entry["sense"]
+                        ?.jsonPrimitive?.contentOrNull
+                        ?.trim()
+                        .orEmpty()
+
+                    val romanization = entry["roman"]
+                        ?.jsonPrimitive?.contentOrNull
+                        ?.trim()
+                        .orEmpty()
+
+                    val details = listOfNotNull(
+                        sense.takeIf { it.isNotBlank() },
+                        partOfSpeech.takeIf { it.isNotBlank() },
+                        romanization.takeIf { it.isNotBlank() }
+                            ?.let { "romanization: $it" }
+                    ).joinToString("; ")
+
+                    val result = if (details.isNotBlank()) {
+                        "$translatedWord ($details)"
+                    } else {
+                        translatedWord
+                    }
+
+                    results.add(result)
+                }
+            }
+
+            results.distinct().joinToString("\n")
         } catch (_: Exception) {
             ""
         } finally {
