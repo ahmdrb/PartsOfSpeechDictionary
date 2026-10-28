@@ -407,6 +407,7 @@ fun DictionaryScreen(
     var showImportOptions by remember { mutableStateOf(false) }
     var confirmReplace by remember { mutableStateOf(false) }
     var backupUiMessage by remember { mutableStateOf<String?>(null) }
+    var showCategoryEntries by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -554,198 +555,216 @@ fun DictionaryScreen(
                 )
             }
 
-            Spacer(Modifier.height(12.dp))
-            Text("Browse Categories", style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text("Explore your vocabulary",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(14.dp))
+            if (!showCategoryEntries) {
+                Spacer(Modifier.height(12.dp))
+                Text("Browse Categories", style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text("Explore your vocabulary",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(14.dp))
 
-            val browseCategories = listOf("All") + GrammarTaxonomy.mainCategories
-            val categoryColors = listOf(
-                MaterialTheme.colorScheme.primaryContainer,
-                MaterialTheme.colorScheme.secondaryContainer,
-                MaterialTheme.colorScheme.tertiaryContainer,
-                MaterialTheme.colorScheme.errorContainer,
-                MaterialTheme.colorScheme.surfaceVariant
-            )
-            val categoryIcons = mapOf(
-                "All" to "📚",
-                "Noun" to "🔵", "Nouns" to "🔵",
-                "Verb" to "🟢", "Verbs" to "🟢",
-                "Adjective" to "🟣", "Adjectives" to "🟣",
-                "Adverb" to "🟠", "Adverbs" to "🟠",
-                "Pronoun" to "👤", "Pronouns" to "👤",
-                "Preposition" to "📍", "Prepositions" to "📍",
-                "Conjunction" to "🔗", "Conjunctions" to "🔗",
-                "Interjection" to "💬", "Interjections" to "💬"
-            )
+                val browseCategories = listOf("All") + GrammarTaxonomy.mainCategories
+                val categoryColors = listOf(
+                    MaterialTheme.colorScheme.primaryContainer,
+                    MaterialTheme.colorScheme.secondaryContainer,
+                    MaterialTheme.colorScheme.tertiaryContainer,
+                    MaterialTheme.colorScheme.errorContainer,
+                    MaterialTheme.colorScheme.surfaceVariant
+                )
+                val categoryIcons = mapOf(
+                    "All" to "📚",
+                    "Noun" to "🔵", "Nouns" to "🔵",
+                    "Verb" to "🟢", "Verbs" to "🟢",
+                    "Adjective" to "🟣", "Adjectives" to "🟣",
+                    "Adverb" to "🟠", "Adverbs" to "🟠",
+                    "Pronoun" to "👤", "Pronouns" to "👤",
+                    "Preposition" to "📍", "Prepositions" to "📍",
+                    "Conjunction" to "🔗", "Conjunctions" to "🔗",
+                    "Interjection" to "💬", "Interjections" to "💬"
+                )
 
-            Text(
-                "YOUR COLLECTION",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                "${allEntries.size} saved words · ${GrammarTaxonomy.mainCategories.size} categories",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
+                Text(
+                    "YOUR VOCABULARY",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "${allEntries.size} saved words · ${GrammarTaxonomy.mainCategories.size} categories",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
 
-            browseCategories.chunked(2).forEachIndexed { rowIndex, rowCategories ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    rowCategories.forEach { category ->
-                        val isAll = category == "All"
-                        val count = if (isAll) {
-                            allEntries.size
-                        } else {
-                            allEntries.count { entry ->
-                                entry.categories.split(",").any {
-                                    it.trim().equals(category, ignoreCase = true)
+                browseCategories.chunked(2).forEachIndexed { rowIndex, rowCategories ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        rowCategories.forEach { category ->
+                            val isAll = category == "All"
+                            val count = if (isAll) {
+                                allEntries.size
+                            } else {
+                                allEntries.count { entry ->
+                                    entry.categories.split(",").any {
+                                        it.trim().equals(category, ignoreCase = true)
+                                    }
+                                }
+                            }
+                            val selected = if (isAll) {
+                                vm.selectedCategory == null
+                            } else {
+                                vm.selectedCategory == category
+                            }
+                            val accent = categoryColors[
+                                (rowIndex * 2 + rowCategories.indexOf(category)) % categoryColors.size
+                            ]
+
+                            ElevatedCard(
+                                onClick = {
+                                    vm.selectedCategory = if (isAll) null else category
+                                    showCategoryEntries = true
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.elevatedCardColors(
+                                    containerColor = if (selected) accent
+                                        else accent.copy(alpha = 0.62f)
+                                ),
+                                elevation = CardDefaults.elevatedCardElevation(
+                                    defaultElevation = if (selected) 3.dp else 1.dp
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        categoryIcons[category] ?: "✨",
+                                        style = MaterialTheme.typography.headlineSmall
+                                    )
+                                    Text(
+                                        category,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        "$count ${if (count == 1) "word" else "words"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        if (selected) "Selected ✓" else "Tap to browse →",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
                         }
-                        val selected = if (isAll) {
-                            vm.selectedCategory == null
-                        } else {
-                            vm.selectedCategory == category
-                        }
-                        val accent = categoryColors[
-                            (rowIndex * 2 + rowCategories.indexOf(category)) % categoryColors.size
-                        ]
-
-                        ElevatedCard(
-                            onClick = {
-                                vm.selectedCategory = if (isAll || selected) null else category
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = if (selected) accent
-                                    else accent.copy(alpha = 0.62f)
-                            ),
-                            elevation = CardDefaults.elevatedCardElevation(
-                                defaultElevation = if (selected) 3.dp else 1.dp
-                            )
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    categoryIcons[category] ?: "✨",
-                                    style = MaterialTheme.typography.headlineSmall
-                                )
-                                Text(
-                                    category,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    "$count ${if (count == 1) "word" else "words"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    if (selected) "Selected ✓" else "Tap to browse →",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                        if (rowCategories.size == 1) {
+                            Spacer(Modifier.weight(1f))
                         }
                     }
-                    if (rowCategories.size == 1) {
-                        Spacer(Modifier.weight(1f))
-                    }
+                    Spacer(Modifier.height(10.dp))
                 }
-                Spacer(Modifier.height(10.dp))
-            }
 
-            Spacer(Modifier.height(14.dp))
-            Text("Collections", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(6.dp))
-            val collections by vm.collections.collectAsStateWithLifecycle()
-            val collectionCounts by vm.collectionCounts.collectAsStateWithLifecycle()
-            val allWordCount by vm.allWordCount.collectAsStateWithLifecycle()
+                Spacer(Modifier.height(14.dp))
+                Text("Collections", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(6.dp))
+                val collections by vm.collections.collectAsStateWithLifecycle()
+                val collectionCounts by vm.collectionCounts.collectAsStateWithLifecycle()
+                val allWordCount by vm.allWordCount.collectAsStateWithLifecycle()
 
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ElevatedCard(
-                    modifier = Modifier
-                        .widthIn(min = 112.dp, max = 190.dp)
-                        .clickable { vm.selectCollection(null) },
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = if (vm.selectedCollectionId == null)
-                            MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surface
-                    )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("All words", fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "$allWordCount ${if (allWordCount == 1) "word" else "words"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                collectionCounts.forEach { collection ->
                     ElevatedCard(
                         modifier = Modifier
-                            .widthIn(min = 132.dp, max = 210.dp)
-                            .clickable { vm.selectCollection(collection.id) },
+                            .widthIn(min = 112.dp, max = 190.dp)
+                            .clickable { vm.selectCollection(null) },
                         colors = CardDefaults.elevatedCardColors(
-                            containerColor = if (vm.selectedCollectionId == collection.id)
+                            containerColor = if (vm.selectedCollectionId == null)
                                 MaterialTheme.colorScheme.primaryContainer
                             else MaterialTheme.colorScheme.surface
                         )
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text(
-                                collection.name,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 2
-                            )
+                            Text("All words", fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "${collection.wordCount} ${if (collection.wordCount == 1) "word" else "words"}",
+                                "$allWordCount ${if (allWordCount == 1) "word" else "words"}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TextButton(onClick = { vm.beginCreateCollection() }) {
-                    Text("+ New collection")
-                }
-                if (vm.selectedCollectionId != null) {
-                    TextButton(onClick = { vm.beginRenameCollection() }) {
-                        Text("Rename")
-                    }
-                    TextButton(onClick = {
-                        vm.collectionToDelete = collections.firstOrNull {
-                            it.id == vm.selectedCollectionId
+
+                    collectionCounts.forEach { collection ->
+                        ElevatedCard(
+                            modifier = Modifier
+                                .widthIn(min = 132.dp, max = 210.dp)
+                                .clickable { vm.selectCollection(collection.id) },
+                            colors = CardDefaults.elevatedCardColors(
+                                containerColor = if (vm.selectedCollectionId == collection.id)
+                                    MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(
+                                    collection.name,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "${collection.wordCount} ${if (collection.wordCount == 1) "word" else "words"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }) {
-                        Text("Delete")
                     }
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = { vm.beginCreateCollection() }) {
+                        Text("+ New collection")
+                    }
+                    if (vm.selectedCollectionId != null) {
+                        TextButton(onClick = { vm.beginRenameCollection() }) {
+                            Text("Rename")
+                        }
+                        TextButton(onClick = {
+                            vm.collectionToDelete = collections.firstOrNull {
+                                it.id == vm.selectedCollectionId
+                            }
+                        }) {
+                            Text("Delete")
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { showCategoryEntries = false }) {
+                        Text("← Back to Categories")
+                    }
+                }
+                Text(
+                    text = vm.selectedCategory ?: "All Words",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(8.dp))
             }
             Spacer(Modifier.height(4.dp))
             Text(
