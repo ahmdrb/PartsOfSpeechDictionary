@@ -30,6 +30,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ahmad.partsofspeechdictionary.data.*
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -72,10 +74,130 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
     var entryToDelete by mutableStateOf<DictionaryEntry?>(null)
     var expandedEntryId by mutableStateOf<Long?>(null)
     var actionsEntryId by mutableStateOf<Long?>(null)
+    var selectedCollectionId by mutableStateOf<Long?>(null)
+        private set
+    var collectionBeingEdited by mutableStateOf<WordCollection?>(null)
+    var showCollectionDialog by mutableStateOf(false)
+    var collectionName by mutableStateOf("")
+    var collectionError by mutableStateOf<String?>(null)
+    var collectionToDelete by mutableStateOf<WordCollection?>(null)
 
-    val entries = repository.entries("").stateIn(
+    private val selectedCollectionFlow = MutableStateFlow<Long?>(null)
+
+    val collections = repository.collections().stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
+
+    val entries = selectedCollectionFlow.flatMapLatest { collectionId ->
+        if (collectionId == null) repository.entries("")
+        else repository.entriesInCollection(collectionId)
+    }.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+
+    fun selectCollection(id: Long?) {
+        selectedCollectionId = id
+        selectedCollectionFlow.value = id
+    }
+
+    fun beginCreateCollection() {
+        collectionBeingEdited = null
+        collectionName = ""
+        collectionError = null
+        showCollectionDialog = true
+    }
+
+    fun beginRenameCollection() {
+        val collection = collections.value.firstOrNull { it.id == selectedCollectionId }
+            ?: return
+        collectionBeingEdited = collection
+        collectionName = collection.name
+        collectionError = null
+        showCollectionDialog = true
+    }
+
+    fun saveCollection() {
+        val name = collectionName.trim()
+        if (name.isBlank()) {
+            collectionError = "Enter a collection name."
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val editing = collectionBeingEdited
+                if (editing == null) {
+                    val id = repository.createCollection(name)
+                    if (id == -1L) {
+                        collectionError = "A collection with that name already exists."
+                        return@launch
+                    }
+                    selectCollection(id)
+                } else {
+                    repository.renameCollection(editing.id, name)
+                }
+                showCollectionDialog = false
+                collectionError = null
+            } catch (e: Exception) {
+                collectionError = if (e.message.orEmpty().contains("UNIQUE", true)) {
+                    "A collection with that name already exists."
+                } else {
+                    e.message ?: "Couldn't save this collection."
+                }
+            }
+        }
+    }
+
+    fun deleteCollection(collection: WordCollection) {
+        viewModelScope.launch {
+            repository.deleteCollection(collection.id)
+            if (selectedCollectionId == collection.id) selectCollection(null)
+            collectionToDelete = null
+        }
+    }
+
+    var manageCollectionsEntry by mutableStateOf<DictionaryEntry?>(null)
+    var showManageCollectionsDialog by mutableStateOf(false)
+    var selectedCollectionIds by mutableStateOf<Set<Long>>(emptySet())
+
+    fun beginManageCollections(entry: DictionaryEntry) {
+        manageCollectionsEntry = entry
+        viewModelScope.launch {
+            selectedCollectionIds = repository.memberships(entry.id)
+                .map { it.collectionId }
+                .toSet()
+            showManageCollectionsDialog = true
+        }
+    }
+
+    fun toggleCollectionMembership(collectionId: Long, checked: Boolean) {
+        selectedCollectionIds = if (checked) {
+            selectedCollectionIds + collectionId
+        } else {
+            selectedCollectionIds - collectionId
+        }
+    }
+
+    fun saveCollectionMemberships() {
+        val entry = manageCollectionsEntry ?: return
+        val selectedIds = selectedCollectionIds
+
+        viewModelScope.launch {
+            val existingIds = repository.memberships(entry.id)
+                .map { it.collectionId }
+                .toSet()
+
+            (existingIds - selectedIds).forEach { id ->
+                repository.removeEntryFromCollection(entry.id, id)
+            }
+            (selectedIds - existingIds).forEach { id ->
+                repository.addEntryToCollection(entry.id, id)
+            }
+
+            showManageCollectionsDialog = false
+            manageCollectionsEntry = null
+        }
+    }
 
     fun lookupOnline() {
         val word = query.trim()
@@ -224,7 +346,46 @@ fun DictionaryScreen(
                         label = { Text(category) })
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(14.dp))
+            Text("Collections", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(6.dp))
+            val collections by vm.collections.collectAsStateWithLifecycle()
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                FilterChip(
+                    selected = vm.selectedCollectionId == null,
+                    onClick = { vm.selectCollection(null) },
+                    label = { Text("All words") }
+                )
+                collections.forEach { collection ->
+                    Spacer(Modifier.width(6.dp))
+                    FilterChip(
+                        selected = vm.selectedCollectionId == collection.id,
+                        onClick = { vm.selectCollection(collection.id) },
+                        label = { Text(collection.name) }
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(onClick = { vm.beginCreateCollection() }) {
+                    Text("+ New collection")
+                }
+                if (vm.selectedCollectionId != null) {
+                    TextButton(onClick = { vm.beginRenameCollection() }) {
+                        Text("Rename")
+                    }
+                    TextButton(onClick = {
+                        vm.collectionToDelete = collections.firstOrNull {
+                            it.id == vm.selectedCollectionId
+                        }
+                    }) {
+                        Text("Delete")
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
                 text = "${visible.size} ${if (visible.size == 1) "word" else "words"} found",
                 style = MaterialTheme.typography.labelMedium,
@@ -306,6 +467,12 @@ fun DictionaryScreen(
                                             vm.actionsEntryId = null
                                         }) {
                                             Text("Edit")
+                                        }
+                                        TextButton(onClick = {
+                                            vm.beginManageCollections(entry)
+                                            vm.actionsEntryId = null
+                                        }) {
+                                            Text("Collections")
                                         }
                                         TextButton(onClick = {
                                             vm.entryToDelete = entry
@@ -411,6 +578,127 @@ fun DictionaryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { vm.entryToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (vm.showCollectionDialog) {
+        AlertDialog(
+            onDismissRequest = { vm.showCollectionDialog = false },
+            title = {
+                Text(if (vm.collectionBeingEdited == null) {
+                    "New collection"
+                } else {
+                    "Rename collection"
+                })
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = vm.collectionName,
+                        onValueChange = {
+                            vm.collectionName = it
+                            vm.collectionError = null
+                        },
+                        label = { Text("Collection name") },
+                        singleLine = true
+                    )
+                    vm.collectionError?.let { error ->
+                        Text(error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.saveCollection() }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.showCollectionDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    vm.collectionToDelete?.let { collection ->
+        AlertDialog(
+            onDismissRequest = { vm.collectionToDelete = null },
+            title = { Text("Delete collection?") },
+            text = {
+                Text(
+                    "Delete \"${collection.name}\"? The words themselves will remain in your dictionary."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteCollection(collection) }) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.collectionToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (vm.showManageCollectionsDialog) {
+        val collections by vm.collections.collectAsStateWithLifecycle()
+        AlertDialog(
+            onDismissRequest = {
+                vm.showManageCollectionsDialog = false
+                vm.manageCollectionsEntry = null
+            },
+            title = {
+                Text("Collections for ${vm.manageCollectionsEntry?.word.orEmpty()}")
+            },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (collections.isEmpty()) {
+                        Text("Create a collection first, then assign words to it.")
+                    } else {
+                        collections.forEach { collection ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        vm.toggleCollectionMembership(
+                                            collection.id,
+                                            collection.id !in vm.selectedCollectionIds
+                                        )
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = collection.id in vm.selectedCollectionIds,
+                                    onCheckedChange = { checked ->
+                                        vm.toggleCollectionMembership(collection.id, checked)
+                                    }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(collection.name)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.saveCollectionMemberships() }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.showManageCollectionsDialog = false
+                    vm.manageCollectionsEntry = null
+                }) {
                     Text("Cancel")
                 }
             }
