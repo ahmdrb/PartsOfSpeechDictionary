@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,8 +33,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private lateinit var pronunciationHelper: PronunciationHelper
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pronunciationHelper = PronunciationHelper(this)
         val db = AppDatabase.get(this)
         val repository = DictionaryRepository(db.dictionaryDao())
         setContent {
@@ -43,9 +47,14 @@ class MainActivity : ComponentActivity() {
                     override fun <T : ViewModel> create(modelClass: Class<T>): T =
                         DictionaryViewModel(repository) as T
                 })
-                DictionaryScreen(vm)
+                DictionaryScreen(vm, pronunciationHelper)
             }
         }
+    }
+
+    override fun onDestroy() {
+        pronunciationHelper.release()
+        super.onDestroy()
     }
 }
 
@@ -118,7 +127,10 @@ class DictionaryViewModel(private val repository: DictionaryRepository) : ViewMo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DictionaryScreen(vm: DictionaryViewModel) {
+fun DictionaryScreen(
+    vm: DictionaryViewModel,
+    pronunciationHelper: PronunciationHelper
+) {
     val allEntries by vm.entries.collectAsStateWithLifecycle()
     val visible = allEntries.filter { entry ->
         (vm.query.isBlank() || entry.word.contains(vm.query, true) ||
@@ -208,8 +220,25 @@ fun DictionaryScreen(vm: DictionaryViewModel) {
                             vm.selectedEntry = entry; vm.showEditor = true
                         }) {
                             Column(Modifier.padding(14.dp)) {
-                                Text(entry.word, style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.SemiBold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        entry.word,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    IconButton(onClick = {
+                                        pronunciationHelper.speak(entry.word)
+                                    }) {
+                                        Icon(
+                                            Icons.Default.VolumeUp,
+                                            contentDescription = "Pronounce ${entry.word}"
+                                        )
+                                    }
+                                }
                                 if (entry.categories.isNotBlank()) {
                                     Text(entry.categories, color = MaterialTheme.colorScheme.primary,
                                         style = MaterialTheme.typography.labelMedium)
@@ -241,7 +270,21 @@ fun DictionaryScreen(vm: DictionaryViewModel) {
             onDismissRequest = { vm.onlineResult = null },
             title = {
                 Column {
-                    Text(result.word, style = MaterialTheme.typography.headlineSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            result.word,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                        IconButton(onClick = {
+                            pronunciationHelper.speak(result.word)
+                        }) {
+                            Icon(
+                                Icons.Default.VolumeUp,
+                                contentDescription = "Pronounce ${result.word}"
+                            )
+                        }
+                    }
                     if (result.pronunciation.isNotBlank()) {
                         Text(
                             result.pronunciation,
