@@ -258,6 +258,14 @@ fun DictionaryScreen(
                                         .replace(Regex("[ \t]+"), " ")
                                     Text(cleanDefinitions, maxLines = 5)
                                 }
+                                if (entry.examples.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Examples: ${entry.examples}")
+                                }
+                                if (entry.notes.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Personal Notes: ${entry.notes}")
+                                }
                                 if (entry.synonyms.isNotBlank()) {
                                     Text("Synonyms: ${entry.synonyms}")
                                 }
