@@ -695,13 +695,18 @@ fun DictionaryScreen(
                                 }
 
                                 if (vm.expandedEntryId == entry.id) {
-                                    IconButton(
-                                        onClick = { pronunciationHelper.speak(entry.word) }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.VolumeUp,
-                                            contentDescription = "Play pronunciation"
-                                        )
+                                        IconButton(
+                                            onClick = { pronunciationHelper.speak(entry.word) }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VolumeUp,
+                                                contentDescription = "Play pronunciation"
+                                            )
+                                        }
                                     }
                                     if (entry.categories.isNotBlank()) {
                                         Text(
