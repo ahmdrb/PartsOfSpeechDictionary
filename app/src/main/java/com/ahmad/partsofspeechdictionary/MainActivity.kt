@@ -5,6 +5,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -160,15 +162,17 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
     val context = LocalContext.current
     var pendingImportJson by remember { mutableStateOf<String?>(null) }
     var showImportModeDialog by remember { mutableStateOf(false) }
+
     BackHandler(enabled = vm.showEditor || showImportModeDialog || showCategoryDialog || activeGroup != null || vm.selectedCategory != null) {
         when {
             vm.showEditor -> vm.showEditor = false
             showImportModeDialog -> showImportModeDialog = false
             showCategoryDialog -> showCategoryDialog = false
-            activeGroup != null -> activeGroup = null
             vm.selectedCategory != null -> vm.selectedCategory = null
+            activeGroup != null -> activeGroup = null
         }
     }
+
 
 
     val exportLauncher = rememberLauncherForActivityResult(
