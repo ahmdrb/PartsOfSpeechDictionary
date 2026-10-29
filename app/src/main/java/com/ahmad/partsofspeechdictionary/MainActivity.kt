@@ -1,45 +1,45 @@
 package com.ahmad.partsofspeechdictionary
 
 import android.os.Bundle
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.ahmad.partsofspeechdictionary.data.*
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -51,12 +51,15 @@ class MainActivity : ComponentActivity() {
         val db = AppDatabase.get(this)
         val repository = DictionaryRepository(db.dictionaryDao())
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
-                val vm: DictionaryViewModel = viewModel(factory = object : ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                        DictionaryViewModel(repository, DictionaryBackupManager(db)) as T
-                })
+            val darkTheme = isSystemInDarkTheme()
+            MaterialTheme(colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme()) {
+                val vm: DictionaryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                    factory = object : ViewModelProvider.Factory {
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                            return DictionaryViewModel(repository, DictionaryBackupManager(db)) as T
+                        }
+                    }
+                )
                 DictionaryScreen(vm, pronunciationHelper)
             }
         }
@@ -73,26 +76,24 @@ class DictionaryViewModel(
     private val backupManager: DictionaryBackupManager
 ) : ViewModel() {
     var query by mutableStateOf("")
-    var selectedCategory by mutableStateOf<String?>(null)
     var showEditor by mutableStateOf(false)
     var selectedEntry by mutableStateOf<DictionaryEntry?>(null)
-    var onlineResult by mutableStateOf<OnlineDictionaryResult?>(null)
     var isLookingUp by mutableStateOf(false)
     var lookupError by mutableStateOf<String?>(null)
-    var entryToDelete by mutableStateOf<DictionaryEntry?>(null)
     var expandedEntryId by mutableStateOf<Long?>(null)
     var actionsEntryId by mutableStateOf<Long?>(null)
-    var relatedWord by mutableStateOf("")
-        private set
-    var relatedWordMessage by mutableStateOf<String?>(null)
-        private set
+    var relatedMessage by mutableStateOf<String?>(null)
+
     var selectedCollectionId by mutableStateOf<Long?>(null)
         private set
-    var collectionBeingEdited by mutableStateOf<WordCollection?>(null)
-    var showCollectionDialog by mutableStateOf(false)
+
+    var selectedCategory by mutableStateOf<WordCollection?>(null)
     var collectionName by mutableStateOf("")
+        private set
     var collectionError by mutableStateOf<String?>(null)
+        private set
     var collectionToDelete by mutableStateOf<WordCollection?>(null)
+        private set
 
     var backupJson by mutableStateOf<String?>(null)
         private set
@@ -108,11 +109,9 @@ class DictionaryViewModel(
     val collections = repository.collections().stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
-
     val collectionCounts = repository.collectionsWithCounts().stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
-
     val allWordCount = repository.entryCount().stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), 0
     )
@@ -120,207 +119,23 @@ class DictionaryViewModel(
     val entries = selectedCollectionFlow.flatMapLatest { collectionId ->
         if (collectionId == null) repository.entries("")
         else repository.entriesInCollection(collectionId)
-    }.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
-    )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun selectCollection(id: Long?) {
         selectedCollectionId = id
         selectedCollectionFlow.value = id
     }
 
-    fun beginCreateCollection() {
-        collectionBeingEdited = null
-        collectionName = ""
-        collectionError = null
-        showCollectionDialog = true
-    }
-
-    fun beginRenameCollection() {
-        val collection = collections.value.firstOrNull { it.id == selectedCollectionId }
-            ?: return
-        collectionBeingEdited = collection
-        collectionName = collection.name
-        collectionError = null
-        showCollectionDialog = true
-    }
-
-    fun saveCollection() {
-        val name = collectionName.trim()
-        if (name.isBlank()) {
-            collectionError = "Enter a collection name."
-            return
-        }
-
+    fun saveEntry(entry: DictionaryEntry) {
         viewModelScope.launch {
-            try {
-                val editing = collectionBeingEdited
-                if (editing == null) {
-                    val id = repository.createCollection(name)
-                    if (id == -1L) {
-                        collectionError = "A collection with that name already exists."
-                        return@launch
-                    }
-                    selectCollection(id)
-                } else {
-                    repository.renameCollection(editing.id, name)
-                }
-                showCollectionDialog = false
-                collectionError = null
-            } catch (e: Exception) {
-                collectionError = if (e.message.orEmpty().contains("UNIQUE", true)) {
-                    "A collection with that name already exists."
-                } else {
-                    e.message ?: "Couldn't save this collection."
-                }
-            }
+            repository.save(entry)
+            selectedEntry = null
         }
     }
 
-    fun deleteCollection(collection: WordCollection) {
-        viewModelScope.launch {
-            repository.deleteCollection(collection.id)
-            if (selectedCollectionId == collection.id) selectCollection(null)
-            collectionToDelete = null
-        }
-    }
-
-    var manageCollectionsEntry by mutableStateOf<DictionaryEntry?>(null)
-    var showManageCollectionsDialog by mutableStateOf(false)
-    var selectedCollectionIds by mutableStateOf<Set<Long>>(emptySet())
-
-    fun beginManageCollections(entry: DictionaryEntry) {
-        manageCollectionsEntry = entry
-        viewModelScope.launch {
-            selectedCollectionIds = repository.memberships(entry.id)
-                .map { it.collectionId }
-                .toSet()
-            showManageCollectionsDialog = true
-        }
-    }
-
-    fun toggleCollectionMembership(collectionId: Long, checked: Boolean) {
-        selectedCollectionIds = if (checked) {
-            selectedCollectionIds + collectionId
-        } else {
-            selectedCollectionIds - collectionId
-        }
-    }
-
-    fun saveCollectionMemberships() {
-        val entry = manageCollectionsEntry ?: return
-        val selectedIds = selectedCollectionIds
-
-        viewModelScope.launch {
-            val existingIds = repository.memberships(entry.id)
-                .map { it.collectionId }
-                .toSet()
-
-            (existingIds - selectedIds).forEach { id ->
-                repository.removeEntryFromCollection(entry.id, id)
-            }
-            (selectedIds - existingIds).forEach { id ->
-                repository.addEntryToCollection(entry.id, id)
-            }
-
-            showManageCollectionsDialog = false
-            manageCollectionsEntry = null
-        }
-    }
-
-    fun lookupOnline() {
-        val word = query.trim()
-        if (word.isBlank() || isLookingUp) return
-
-        viewModelScope.launch {
-            isLookingUp = true
-            lookupError = null
-            onlineResult = null
-            try {
-                val dictionaryResult = withContext(Dispatchers.IO) {
-                    OnlineDictionaryClient.lookup(word)
-                }
-                onlineResult = dictionaryResult
-            } catch (e: Exception) {
-                lookupError = e.message ?: "Lookup failed. Check your internet connection."
-            } finally {
-                isLookingUp = false
-            }
-        }
-    }
-
-    fun saveOnlineResult(result: OnlineDictionaryResult) {
-        val categories = result.definitions
-            .map { it.partOfSpeech.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .joinToString(", ")
-
-        val definitions = result.definitions
-            .mapIndexed { index, item ->
-                "${index + 1}. ${item.definition}"
-            }
-            .joinToString("\n")
-
-        save(DictionaryEntry(
-            word = result.word,
-            definitions = definitions,
-            pronunciation = result.pronunciation,
-            categories = categories,
-            synonyms = result.synonyms,
-            antonyms = result.antonyms,
-            source = "Free Dictionary API + Datamuse"
-        ))
-        onlineResult = null
-    }
-
-    fun delete(entry: DictionaryEntry) {
+    fun deleteEntry(entry: DictionaryEntry) {
         viewModelScope.launch {
             repository.delete(entry.id)
-            entryToDelete = null
-            if (selectedEntry?.id == entry.id) {
-                selectedEntry = null
-                showEditor = false
-            }
-        }
-    }
-
-    fun prepareBackupExport() {
-        viewModelScope.launch {
-            isBackupBusy = true
-            backupError = null
-            backupMessage = null
-            try {
-                backupJson = withContext(Dispatchers.IO) { backupManager.exportJson() }
-            } catch (e: Exception) {
-                backupError = e.message ?: "Could not create backup."
-            } finally {
-                isBackupBusy = false
-            }
-        }
-    }
-
-    fun clearPreparedBackup() {
-        backupJson = null
-    }
-
-    fun importBackup(json: String, mode: DictionaryBackupManager.ImportMode) {
-        viewModelScope.launch {
-            isBackupBusy = true
-            backupError = null
-            backupMessage = null
-            try {
-                withContext(Dispatchers.IO) { backupManager.importJson(json, mode) }
-                backupMessage = if (mode == DictionaryBackupManager.ImportMode.MERGE) {
-                    "Backup merged successfully."
-                } else {
-                    "Backup restored successfully."
-                }
-            } catch (e: Exception) {
-                backupError = e.message ?: "Could not import backup. No successful import was completed."
-            } finally {
-                isBackupBusy = false
-            }
         }
     }
 
@@ -329,93 +144,56 @@ class DictionaryViewModel(
         backupError = null
     }
 
-    fun openRelatedWord(word: String) {
-        val target = word.trim()
-        if (target.isBlank()) return
-
+    fun exportData(onResult: (String) -> Unit) {
         viewModelScope.launch {
-            val existing = repository.findByWord(target)
-            if (existing != null) {
-                query = ""
-                selectedCategory = null
-                selectedCollectionFlow.value = null
-                selectedCollectionId = null
-                expandedEntryId = existing.id
-                actionsEntryId = null
-                relatedWord = ""
-                relatedWordMessage = null
-            } else {
-                relatedWord = target
-                relatedWordMessage = "\"$target\" isn't saved in your dictionary yet."
+            isBackupBusy = true
+            clearBackupStatus()
+            try {
+                val json = withContext(Dispatchers.IO) { backupManager.exportJson() }
+                onResult(json)
+                backupMessage = "Backup exported successfully."
+            } catch (e: Exception) {
+                backupError = "Export failed: ${e.message}"
+            } finally {
+                isBackupBusy = false
             }
         }
     }
 
-    fun addRelatedWordManually() {
-        val target = relatedWord
-        if (target.isBlank()) return
-
-        selectedEntry = DictionaryEntry(word = target)
-        showEditor = true
-        relatedWord = ""
-        relatedWordMessage = null
-    }
-
-    fun dismissRelatedWordPrompt() {
-        relatedWord = ""
-        relatedWordMessage = null
-    }
-
-    fun lookupRelatedWordOnline() {
-        val target = relatedWord.trim()
-        if (target.isBlank()) return
-
-        query = target
-        relatedWord = ""
-        relatedWordMessage = null
-        lookupOnline()
-    }
-
-    fun save(entry: DictionaryEntry) {
+    fun importData(json: String, mode: DictionaryBackupManager.ImportMode) {
         viewModelScope.launch {
-            repository.save(entry)
-            showEditor = false
-            selectedEntry = null
+            isBackupBusy = true
+            clearBackupStatus()
+            try {
+                withContext(Dispatchers.IO) { backupManager.importJson(json, mode) }
+                backupMessage = "Import completed successfully."
+            } catch (e: Exception) {
+                backupError = "Import failed: ${e.message}"
+            } finally {
+                isBackupBusy = false
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DictionaryScreen(
-    vm: DictionaryViewModel,
-    pronunciationHelper: PronunciationHelper
-) {
-    val allEntries by vm.entries.collectAsStateWithLifecycle()
-    val visible = allEntries.filter { entry ->
-        (vm.query.isBlank() || entry.word.contains(vm.query, true) ||
-            entry.definitions.contains(vm.query, true)) &&
-        (vm.selectedCategory == null || entry.categories.split(",").any {
-            it.trim().equals(vm.selectedCategory, true)
-        })
-    }
-
+fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
+    var refreshCounter by remember { mutableStateOf(0) }
+    var showCategoryDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var exportUri by remember { mutableStateOf<Uri?>(null) }
     var pendingImportJson by remember { mutableStateOf<String?>(null) }
-    var showImportOptions by remember { mutableStateOf(false) }
-    var confirmReplace by remember { mutableStateOf(false) }
-    var backupUiMessage by remember { mutableStateOf<String?>(null) }
-    var showCategoryEntries by remember { mutableStateOf(false) }
+    var showImportModeDialog by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
-            exportUri = uri
-            vm.clearPreparedBackup()
-            vm.prepareBackupExport()
+            vm.exportData { json ->
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                } catch (e: Exception) { vm.clearBackupStatus() }
+            }
         }
     }
 
@@ -423,893 +201,316 @@ fun DictionaryScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            scope.launch {
-                try {
-                    val json = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)
-                            ?.bufferedReader(Charsets.UTF_8)
-                            ?.use { it.readText() }
-                            ?: error("Could not open the selected file.")
-                    }
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                if (json != null) {
                     pendingImportJson = json
-                    showImportOptions = true
-                    backupUiMessage = null
-                    vm.clearBackupStatus()
-                } catch (e: Exception) {
-                    backupUiMessage = "Import failed: ${e.message ?: "Could not read file."}"
+                    showImportModeDialog = true
                 }
-            }
+            } catch (e: Exception) {}
         }
     }
 
-    LaunchedEffect(vm.backupJson, exportUri) {
-        val json = vm.backupJson
-        val uri = exportUri
-        if (json != null && uri != null) {
-            try {
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri)
-                        ?.bufferedWriter(Charsets.UTF_8)
-                        ?.use { it.write(json) }
-                        ?: error("Could not write to the selected file.")
-                }
-                backupUiMessage = "Backup exported successfully."
-            } catch (e: Exception) {
-                backupUiMessage = "Export failed: ${e.message ?: "Could not write file."}"
-            } finally {
-                exportUri = null
-                vm.clearPreparedBackup()
-            }
+    LaunchedEffect(vm.backupMessage, vm.backupError) {
+        vm.backupMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            vm.clearBackupStatus()
+            refreshCounter++
         }
+        vm.backupError?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            vm.clearBackupStatus()
+        }
+    }
+
+    val entries by vm.entries.collectAsStateWithLifecycle()
+    val collections by vm.collections.collectAsStateWithLifecycle()
+
+    val filteredEntries = entries.filter { entry ->
+        val matchesQuery = vm.query.isBlank() ||
+            entry.word.contains(vm.query, ignoreCase = true) ||
+            entry.definitions.contains(vm.query, ignoreCase = true)
+        val matchesCategory = vm.selectedCategory == null ||
+            entry.categories.contains(vm.selectedCategory?.name ?: "", ignoreCase = true)
+        matchesQuery && matchesCategory
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
+                title = { 
                     Column {
                         Text("Wordwise", fontWeight = FontWeight.Bold)
                         Text("Parts of Speech Dictionary", style = MaterialTheme.typography.labelSmall)
                     }
                 },
                 actions = {
-                    TextButton(
-                        enabled = !vm.isBackupBusy,
-                        onClick = {
-                            backupUiMessage = null
-                            vm.clearBackupStatus()
-                            exportLauncher.launch("wordwise-backup.json")
-                        }
-                    ) { Text("Export") }
-                    TextButton(
-                        enabled = !vm.isBackupBusy,
-                        onClick = {
-                            backupUiMessage = null
-                            vm.clearBackupStatus()
-                            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-                        }
-                    ) { Text("Import") }
+                    if (vm.isBackupBusy) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 8.dp))
+                    } else {
+                        IconButton(onClick = { vm.clearBackupStatus(); exportLauncher.launch("wordwise_backup.json") }) { Icon(Icons.Default.Upload, contentDescription = "Export") }
+                        IconButton(onClick = { vm.clearBackupStatus(); importLauncher.launch(arrayOf("application/json")) }) { Icon(Icons.Default.Download, contentDescription = "Import") }
+                    }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { vm.selectedEntry = null; vm.showEditor = true }) {
+            FloatingActionButton(onClick = {
+                vm.selectedEntry = null
+                vm.showEditor = true
+            }) {
                 Icon(Icons.Default.Add, contentDescription = "Add word")
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            val statusMessage = backupUiMessage ?: vm.backupMessage
-            val errorMessage = vm.backupError
-
-            if (statusMessage != null) {
-                Text(statusMessage, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(4.dp))
-            }
-            if (errorMessage != null) {
-                Text(errorMessage, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(4.dp))
-            }
-            if (vm.isBackupBusy) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                Spacer(Modifier.height(4.dp))
-            }
-
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+        ) {
             OutlinedTextField(
-                value = vm.query, onValueChange = { vm.query = it },
+                value = vm.query,
+                onValueChange = { vm.query = it },
                 modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search words and definitions") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                label = { Text("Search words and definitions") },
                 trailingIcon = {
-                    if (vm.query.isNotEmpty()) {
-                        IconButton(onClick = { vm.query = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search")
-                        }
+                    if (vm.query.isNotBlank()) {
+                        IconButton(onClick = { vm.query = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
                     }
                 },
                 singleLine = true
             )
+            
             Spacer(Modifier.height(8.dp))
+            
             Button(
-                onClick = { vm.lookupOnline() },
-                enabled = vm.query.isNotBlank() && !vm.isLookingUp,
-                modifier = Modifier.fillMaxWidth()
+                onClick = { showCategoryDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
             ) {
-                if (vm.isLookingUp) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Looking up online...")
-                } else {
-                    Text("Look up online")
-                }
-            }
-
-            vm.lookupError?.let { error ->
                 Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
+                    text = vm.selectedCategory?.name ?: "Filter: All Words",
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
             }
+            
+            Spacer(Modifier.height(16.dp))
 
-            if (!showCategoryEntries) {
-                Spacer(Modifier.height(12.dp))
-                Text("Browse Categories", style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text("Explore your vocabulary",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(14.dp))
-
-                val browseCategories = listOf("All") + GrammarTaxonomy.mainCategories
-                val categoryColors = listOf(
-                    MaterialTheme.colorScheme.primaryContainer,
-                    MaterialTheme.colorScheme.secondaryContainer,
-                    MaterialTheme.colorScheme.tertiaryContainer,
-                    MaterialTheme.colorScheme.errorContainer,
-                    MaterialTheme.colorScheme.surfaceVariant
-                )
-                val categoryIcons = mapOf(
-                    "All" to "📚",
-                    "Noun" to "🔵", "Nouns" to "🔵",
-                    "Verb" to "🟢", "Verbs" to "🟢",
-                    "Adjective" to "🟣", "Adjectives" to "🟣",
-                    "Adverb" to "🟠", "Adverbs" to "🟠",
-                    "Pronoun" to "👤", "Pronouns" to "👤",
-                    "Preposition" to "📍", "Prepositions" to "📍",
-                    "Conjunction" to "🔗", "Conjunctions" to "🔗",
-                    "Interjection" to "💬", "Interjections" to "💬"
-                )
-
-                Text(
-                    "YOUR VOCABULARY",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    "${allEntries.size} saved words · ${GrammarTaxonomy.mainCategories.size} categories",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-
-                browseCategories.chunked(2).forEachIndexed { rowIndex, rowCategories ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        rowCategories.forEach { category ->
-                            val isAll = category == "All"
-                            val count = if (isAll) {
-                                allEntries.size
-                            } else {
-                                allEntries.count { entry ->
-                                    entry.categories.split(",").any {
-                                        it.trim().equals(category, ignoreCase = true)
-                                    }
-                                }
-                            }
-                            val selected = if (isAll) {
-                                vm.selectedCategory == null
-                            } else {
-                                vm.selectedCategory == category
-                            }
-                            val accent = categoryColors[
-                                (rowIndex * 2 + rowCategories.indexOf(category)) % categoryColors.size
-                            ]
-
-                            ElevatedCard(
-                                onClick = {
-                                    vm.selectedCategory = if (isAll) null else category
-                                    showCategoryEntries = true
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.elevatedCardColors(
-                                    containerColor = if (selected) accent
-                                        else accent.copy(alpha = 0.62f)
-                                ),
-                                elevation = CardDefaults.elevatedCardElevation(
-                                    defaultElevation = if (selected) 3.dp else 1.dp
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        categoryIcons[category] ?: "✨",
-                                        style = MaterialTheme.typography.headlineSmall
-                                    )
-                                    Text(
-                                        category,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1
-                                    )
-                                    Text(
-                                        "$count ${if (count == 1) "word" else "words"}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        if (selected) "Selected ✓" else "Tap to browse →",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                        if (rowCategories.size == 1) {
-                            Spacer(Modifier.weight(1f))
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                }
-
-                Spacer(Modifier.height(14.dp))
-                Text("Collections", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
-                val collections by vm.collections.collectAsStateWithLifecycle()
-                val collectionCounts by vm.collectionCounts.collectAsStateWithLifecycle()
-                val allWordCount by vm.allWordCount.collectAsStateWithLifecycle()
-
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ElevatedCard(
-                        modifier = Modifier
-                            .widthIn(min = 112.dp, max = 190.dp)
-                            .clickable { vm.selectCollection(null) },
-                        colors = CardDefaults.elevatedCardColors(
-                            containerColor = if (vm.selectedCollectionId == null)
-                                MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surface
-                        )
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("All words", fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "$allWordCount ${if (allWordCount == 1) "word" else "words"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    collectionCounts.forEach { collection ->
-                        ElevatedCard(
-                            modifier = Modifier
-                                .widthIn(min = 132.dp, max = 210.dp)
-                                .clickable { vm.selectCollection(collection.id) },
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = if (vm.selectedCollectionId == collection.id)
-                                    MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surface
-                            )
-                        ) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text(
-                                    collection.name,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 2
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    "${collection.wordCount} ${if (collection.wordCount == 1) "word" else "words"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TextButton(onClick = { vm.beginCreateCollection() }) {
-                        Text("+ New collection")
-                    }
-                    if (vm.selectedCollectionId != null) {
-                        TextButton(onClick = { vm.beginRenameCollection() }) {
-                            Text("Rename")
-                        }
-                        TextButton(onClick = {
-                            vm.collectionToDelete = collections.firstOrNull {
-                                it.id == vm.selectedCollectionId
-                            }
-                        }) {
-                            Text("Delete")
-                        }
-                    }
+            if (vm.selectedCategory == null && vm.query.isBlank()) {
+                CategoryGrid(collections) { col ->
+                    vm.selectedCategory = col
+                    refreshCounter++
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = { showCategoryEntries = false }) {
-                        Text("← Back to Categories")
-                    }
-                }
-                Text(
-                    text = vm.selectedCategory ?: "All Words",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "${visible.size} ${if (visible.size == 1) "word" else "words"} found",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(8.dp))
-            if (visible.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (allEntries.isEmpty()) "Your dictionary starts here" else "No matching entries")
-                        Spacer(Modifier.height(6.dp))
-                        Text("Tap + to add a word and save its details.",
-                            style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(visible, key = { it.id }) { entry ->
-                        ElevatedCard(
-                            modifier = Modifier.fillMaxWidth().combinedClickable(
-                                onClick = {
-                                    vm.expandedEntryId =
-                                        if (vm.expandedEntryId == entry.id) null else entry.id
-                                    vm.actionsEntryId = null
-                                },
-                                onLongClick = {
-                                    vm.actionsEntryId =
-                                        if (vm.actionsEntryId == entry.id) null else entry.id
-                                }
-                            )
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        entry.word,
-                                        modifier = if (vm.expandedEntryId == entry.id) Modifier else Modifier.weight(1f),
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    if (vm.expandedEntryId == entry.id) {
-                                        IconButton(
-                                            onClick = { pronunciationHelper.speak(entry.word) }
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.VolumeUp,
-                                                contentDescription = "Play pronunciation"
-                                            )
-                                        }
-                                    }
-                                }
-
-                                if (vm.expandedEntryId == entry.id) {
-                                    if (entry.categories.isNotBlank()) {
-                                        Text(
-                                            entry.categories,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            style = MaterialTheme.typography.labelMedium
-                                        )
-                                    }
-                                    if (entry.pronunciation.isNotBlank()) {
-                                        Text("Pronunciation: ${entry.pronunciation}")
-                                    }
-                                    if (entry.definitions.isNotBlank()) {
-                                        val cleanDefinitions = entry.definitions
-                                            .replace("\\n", "\n")
-                                            .replace(Regex("\\s*\\[[^]]+\\]\\s*"), " ")
-                                            .replace(Regex("[ \\t]+"), " ")
-                                        Text(cleanDefinitions)
-                                    }
-                                    if (entry.notes.isNotBlank()) {
-                                        Text("Personal Notes: ${entry.notes}")
-                                    }
-                                    val familyEntries = findWordFamily(entry, allEntries)
-                                    if (
-                                        familyEntries.isNotEmpty() ||
-                                        entry.synonyms.isNotBlank() ||
-                                        entry.antonyms.isNotBlank()
-                                    ) {
-                                        Text(
-                                            "Word Relationships",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    WordRelationshipRow(
-                                        label = "Synonyms",
-                                        words = entry.synonyms,
-                                        onWordClick = vm::openRelatedWord
-                                    )
-                                    WordRelationshipRow(
-                                        label = "Antonyms",
-                                        words = entry.antonyms,
-                                        onWordClick = vm::openRelatedWord
-                                    )
-                                    if (familyEntries.isNotEmpty()) {
-                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text("Word Family", fontWeight = FontWeight.SemiBold)
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth()
-                                                    .horizontalScroll(rememberScrollState()),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                familyEntries.forEach { related ->
-                                                    SuggestionChip(
-                                                        onClick = { vm.openRelatedWord(related.word) },
-                                                        label = { Text(related.word) }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (vm.actionsEntryId == entry.id) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End
-                                    ) {
-                                        TextButton(onClick = {
-                                            vm.selectedEntry = entry
-                                            vm.showEditor = true
-                                            vm.actionsEntryId = null
-                                        }) {
-                                            Text("Edit")
-                                        }
-                                        TextButton(onClick = {
-                                            vm.beginManageCollections(entry)
-                                            vm.actionsEntryId = null
-                                        }) {
-                                            Text("Collections")
-                                        }
-                                        TextButton(onClick = {
-                                            vm.entryToDelete = entry
-                                            vm.actionsEntryId = null
-                                        }) {
-                                            Text("Delete")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                key(refreshCounter) {
+                    DictionaryList(filteredEntries, vm, pronunciationHelper, onRefresh = { refreshCounter++ })
                 }
             }
         }
-    }
-    vm.relatedWordMessage?.let { message ->
-        AlertDialog(
-            onDismissRequest = { vm.dismissRelatedWordPrompt() },
-            title = { Text("Word relationship") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { vm.addRelatedWordManually() }) {
-                    Text("Add Manually")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = { vm.lookupRelatedWordOnline() }
-                    ) {
-                        Text("Look Up Online")
-                    }
-                    TextButton(
-                        onClick = { vm.dismissRelatedWordPrompt() }
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            }
-        )
-    }
-
-    vm.onlineResult?.let { result ->
-        AlertDialog(
-            onDismissRequest = { vm.onlineResult = null },
-            title = {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            result.word,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        IconButton(onClick = {
-                            pronunciationHelper.speak(result.word)
-                        }) {
-                            Icon(
-                                Icons.Default.VolumeUp,
-                                contentDescription = "Pronounce ${result.word}"
-                            )
-                        }
-                    }
-                    if (result.pronunciation.isNotBlank()) {
-                        Text(
-                            result.pronunciation,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            },
-            text = {
-                Column(
-                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    result.definitions.forEachIndexed { index, item ->
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                "${index + 1}. ${item.partOfSpeech.ifBlank { "Definition" }}",
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(item.definition)
-                        }
-                    }
-                    if (result.synonyms.isNotBlank()) {
-                        Text(
-                            "Synonyms: ${result.synonyms}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    if (result.antonyms.isNotBlank()) {
-                        Text(
-                            "Antonyms: ${result.antonyms}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-
-                    Text(
-                        "Source: Free Dictionary API",
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.saveOnlineResult(result) }) {
-                    Text("Save to my dictionary")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.onlineResult = null }) {
-                    Text("Close")
-                }
-            }
-        )
-    }
-
-    vm.entryToDelete?.let { entry ->
-        AlertDialog(
-            onDismissRequest = { vm.entryToDelete = null },
-            title = { Text("Delete word?") },
-            text = {
-                Text("Delete \"${entry.word}\" from your dictionary? This cannot be undone.")
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.delete(entry) }) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.entryToDelete = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (vm.showCollectionDialog) {
-        AlertDialog(
-            onDismissRequest = { vm.showCollectionDialog = false },
-            title = {
-                Text(if (vm.collectionBeingEdited == null) {
-                    "New collection"
-                } else {
-                    "Rename collection"
-                })
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = vm.collectionName,
-                        onValueChange = {
-                            vm.collectionName = it
-                            vm.collectionError = null
-                        },
-                        label = { Text("Collection name") },
-                        singleLine = true
-                    )
-                    vm.collectionError?.let { error ->
-                        Text(error, color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.saveCollection() }) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.showCollectionDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    vm.collectionToDelete?.let { collection ->
-        AlertDialog(
-            onDismissRequest = { vm.collectionToDelete = null },
-            title = { Text("Delete collection?") },
-            text = {
-                Text(
-                    "Delete \"${collection.name}\"? The words themselves will remain in your dictionary."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.deleteCollection(collection) }) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.collectionToDelete = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (vm.showManageCollectionsDialog) {
-        val collections by vm.collections.collectAsStateWithLifecycle()
-        AlertDialog(
-            onDismissRequest = {
-                vm.showManageCollectionsDialog = false
-                vm.manageCollectionsEntry = null
-            },
-            title = {
-                Text("Collections for ${vm.manageCollectionsEntry?.word.orEmpty()}")
-            },
-            text = {
-                Column(
-                    Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (collections.isEmpty()) {
-                        Text("Create a collection first, then assign words to it.")
-                    } else {
-                        collections.forEach { collection ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        vm.toggleCollectionMembership(
-                                            collection.id,
-                                            collection.id !in vm.selectedCollectionIds
-                                        )
-                                    }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = collection.id in vm.selectedCollectionIds,
-                                    onCheckedChange = { checked ->
-                                        vm.toggleCollectionMembership(collection.id, checked)
-                                    }
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(collection.name)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.saveCollectionMemberships() }) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    vm.showManageCollectionsDialog = false
-                    vm.manageCollectionsEntry = null
-                }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (showImportOptions && pendingImportJson != null) {
-        AlertDialog(
-            onDismissRequest = {
-                showImportOptions = false
-                pendingImportJson = null
-            },
-            title = { Text("Import backup") },
-            text = {
-                Text(
-                    "Merge adds missing words and collections while preserving existing words. " +
-                    "Replace removes the current dictionary data before restoring this backup."
-                )
-            },
-            confirmButton = {
-                Row {
-                    TextButton(
-                        enabled = !vm.isBackupBusy,
-                        onClick = {
-                            val json = pendingImportJson
-                            if (json != null) {
-                                vm.importBackup(json, DictionaryBackupManager.ImportMode.MERGE)
-                            }
-                            showImportOptions = false
-                            pendingImportJson = null
-                        }
-                    ) { Text("Merge") }
-                    TextButton(
-                        enabled = !vm.isBackupBusy,
-                        onClick = {
-                            showImportOptions = false
-                            confirmReplace = true
-                        }
-                    ) { Text("Replace…") }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showImportOptions = false
-                    pendingImportJson = null
-                }) { Text("Cancel") }
-            }
-        )
-    }
-
-    if (confirmReplace && pendingImportJson != null) {
-        AlertDialog(
-            onDismissRequest = { confirmReplace = false },
-            title = { Text("Replace dictionary?") },
-            text = {
-                Text(
-                    "This will replace the current words, collections, and collection links " +
-                    "with the selected backup. This action cannot be undone unless you have " +
-                    "another backup."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !vm.isBackupBusy,
-                    onClick = {
-                        val json = pendingImportJson
-                        if (json != null) {
-                            vm.importBackup(json, DictionaryBackupManager.ImportMode.REPLACE)
-                        }
-                        confirmReplace = false
-                        pendingImportJson = null
-                    }
-                ) { Text("Confirm replace") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    confirmReplace = false
-                    pendingImportJson = null
-                }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     if (vm.showEditor) {
         EntryEditor(
             initial = vm.selectedEntry,
-            onDismiss = { vm.showEditor = false; vm.selectedEntry = null },
-            onSave = vm::save
+            onDismiss = { vm.showEditor = false },
+            onSave = { vm.saveEntry(it); vm.showEditor = false },
+            onDelete = { vm.deleteEntry(it); vm.showEditor = false }
+        )
+    }
+
+    if (showImportModeDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportModeDialog = false },
+            title = { Text("Import Backup") },
+            text = { Text("Do you want to merge with existing words, or replace the entire dictionary?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingImportJson?.let { vm.importData(it, DictionaryBackupManager.ImportMode.REPLACE) }
+                    showImportModeDialog = false
+                }) { Text("Replace All", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        pendingImportJson?.let { vm.importData(it, DictionaryBackupManager.ImportMode.MERGE) }
+                        showImportModeDialog = false
+                    }) { Text("Merge") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { showImportModeDialog = false }) { Text("Cancel") }
+                }
+            }
+        )
+    }
+
+    if (showCategoryDialog) {
+        SearchableCategoryDialog(
+            collections = collections,
+            selected = vm.selectedCategory,
+            onSelect = {
+                vm.selectedCategory = it
+                showCategoryDialog = false
+                refreshCounter++
+            },
+            onDismiss = { showCategoryDialog = false }
         )
     }
 }
 
-private fun findWordFamily(
-    entry: DictionaryEntry,
-    entries: List<DictionaryEntry>
-): List<DictionaryEntry> {
-    fun normalized(word: String): String =
-        word.lowercase().trim().replace(Regex("[^a-z]"), "")
+@Composable
+fun SearchableCategoryDialog(
+    collections: List<WordCollection>,
+    selected: WordCollection?,
+    onSelect: (WordCollection?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = collections.filter { it.name.contains(query, ignoreCase = true) }
 
-    fun familyKey(word: String): String {
-        val w = normalized(word)
-
-        // Explicit spelling variants in the decide family.
-        if (w in setOf(
-                "decide", "decides", "decided", "deciding",
-                "decision", "decisions", "decisive",
-                "decisively", "decisiveness"
-            )
-        ) {
-            return "decide-family"
-        }
-
-        // Only group explicitly recognized word-family members for now.
-        return w
-    }
-
-    val key = familyKey(entry.word)
-    if (key.isBlank()) return emptyList()
-
-    return entries
-        .asSequence()
-        .filter { it.id != entry.id }
-        .filter { familyKey(it.word) == key }
-        .distinctBy { it.id }
-        .sortedBy { it.word.lowercase() }
-        .toList()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Filter by Category") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search categories...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                    item {
+                        ListItem(
+                            headlineContent = { Text("All Words", fontWeight = FontWeight.Bold) },
+                            modifier = Modifier.clickable { onSelect(null) }
+                        )
+                    }
+                    items(filtered) { col ->
+                        ListItem(
+                            headlineContent = { Text(col.name) },
+                            modifier = Modifier.clickable { onSelect(col) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WordRelationshipRow(
-    label: String,
-    words: String,
-    onWordClick: (String) -> Unit
-) {
-    val items = words.split(",", ";", "\n")
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinctBy { it.lowercase() }
+fun CategoryGrid(collections: List<WordCollection>, onSelect: (WordCollection?) -> Unit) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            ElevatedCard(modifier = Modifier.clickable { onSelect(null) }) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("All Words", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        items(collections) { col ->
+            ElevatedCard(modifier = Modifier.clickable { onSelect(col) }) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(col.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
 
-    if (items.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, fontWeight = FontWeight.SemiBold)
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items.forEach { relatedWord ->
-                    SuggestionChip(
-                        onClick = { onWordClick(relatedWord) },
-                        label = { Text(relatedWord) }
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun DictionaryList(
+    entries: List<DictionaryEntry>,
+    vm: DictionaryViewModel,
+    pronunciationHelper: PronunciationHelper,
+    onRefresh: () -> Unit
+) {
+    if (entries.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No words found.", style = MaterialTheme.typography.bodyLarge)
+        }
+        return
+    }
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = 80.dp)
+    ) {
+        items(entries, key = { it.id }) { entry ->
+            EntryCard(entry, vm, pronunciationHelper, onRefresh)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun EntryCard(
+    entry: DictionaryEntry,
+    vm: DictionaryViewModel,
+    pronunciationHelper: PronunciationHelper,
+    onRefresh: () -> Unit
+) {
+    val isExpanded = vm.expandedEntryId == entry.id
+    
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {
+                    vm.expandedEntryId = if (isExpanded) null else entry.id
+                },
+                onLongClick = {
+                    vm.selectedEntry = entry
+                    vm.showEditor = true
+                }
+            )
+    ) {
+        Column(modifier = Modifier.padding(16.dp).animateContentSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = entry.word,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                if (isExpanded && !entry.pronunciation.isNullOrBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(
+                        onClick = { pronunciationHelper.speak(entry.word) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Pronounce")
+                    }
+                }
+            }
+            
+            if (isExpanded) {
+                if (entry.categories.isNotBlank()) {
+                    Text(
+                        text = entry.categories,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelMedium
                     )
+                }
+                Spacer(Modifier.height(4.dp))
+                if (entry.definitions.isNotBlank()) {
+                    val cleanDef = entry.definitions
+                        .replace(Regex("\\[\\[\\]\\\"']"), "")
+                        .replace(Regex("\"\"\""), "")
+                    Text(cleanDef, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (!entry.notes.isNullOrBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Notes: ${entry.notes}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -1317,51 +518,117 @@ private fun WordRelationshipRow(
 }
 
 @Composable
-fun EntryEditor(initial: DictionaryEntry?, onDismiss: () -> Unit, onSave: (DictionaryEntry) -> Unit) {
-    var word by remember(initial) { mutableStateOf(initial?.word.orEmpty()) }
-    var definitions by remember(initial) { mutableStateOf(initial?.definitions.orEmpty()) }
-    var categories by remember(initial) { mutableStateOf(initial?.categories.orEmpty()) }
-    var pronunciation by remember(initial) { mutableStateOf(initial?.pronunciation.orEmpty()) }
-    var notes by remember(initial) { mutableStateOf(initial?.notes.orEmpty()) }
-    var synonyms by remember(initial) { mutableStateOf(initial?.synonyms.orEmpty()) }
-    var antonyms by remember(initial) { mutableStateOf(initial?.antonyms.orEmpty()) }
+fun EntryEditor(
+    initial: DictionaryEntry?,
+    onDismiss: () -> Unit,
+    onSave: (DictionaryEntry) -> Unit,
+    onDelete: (DictionaryEntry) -> Unit
+) {
+    var word by remember(initial) { mutableStateOf(initial?.word ?: "") }
+    val scope = rememberCoroutineScope()
+    var isLookingUp by remember { mutableStateOf(false) }
+    var lookupError by remember { mutableStateOf<String?>(null) }
+    
+    var definitions by remember(initial) { mutableStateOf(initial?.definitions ?: "") }
+    var pronunciation by remember(initial) { mutableStateOf(initial?.pronunciation ?: "") }
+    var categories by remember(initial) { mutableStateOf(initial?.categories ?: "") }
+    var notes by remember(initial) { mutableStateOf(initial?.notes ?: "") }
+    var synonyms by remember(initial) { mutableStateOf(initial?.synonyms ?: "") }
+    var antonyms by remember(initial) { mutableStateOf(initial?.antonyms ?: "") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Add dictionary entry" else "Edit entry") },
+        title = { Text(if (initial == null) "Add Word" else "Edit Word") },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(word, { word = it }, label = { Text("Word *") }, singleLine = true)
-                OutlinedTextField(categories, { categories = it },
-                    label = { Text("Parts of speech (comma-separated)") },
-                    supportingText = { Text("Example: Noun, Verb") })
-                OutlinedTextField(definitions, { definitions = it }, label = { Text("Definitions") })
-                OutlinedTextField(pronunciation, { pronunciation = it }, label = { Text("Pronunciation") })
-                OutlinedTextField(synonyms, { synonyms = it }, label = { Text("Synonyms (comma-separated)") })
-                OutlinedTextField(antonyms, { antonyms = it }, label = { Text("Antonyms (comma-separated)") })
-                OutlinedTextField(notes, { notes = it }, label = { Text("Personal notes") })
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = word, onValueChange = { word = it }, label = { Text("Word") }, modifier = Modifier.weight(1f))
+                    IconButton(onClick = {
+                        if (word.isNotBlank()) {
+                            isLookingUp = true
+                            lookupError = null
+                            scope.launch {
+                                try {
+                                    val res = withContext(Dispatchers.IO) { OnlineDictionaryClient.lookup(word) }
+                                    pronunciation = res.pronunciation
+                                    
+                                    val partsOfSpeech = res.definitions.map { it.partOfSpeech }.filter { it.isNotBlank() }.distinct().joinToString(", ")
+                                    if (partsOfSpeech.isNotBlank() && categories.isBlank()) categories = partsOfSpeech
+                                    
+                                    definitions = res.definitions.joinToString("\n\n") { it.definition }
+                                    synonyms = res.synonyms
+                                    antonyms = res.antonyms
+                                    if (res.antonyms.isBlank()) lookupError = "No exact antonyms found online. Please type manually."
+                                } catch (e: Exception) {
+                                    lookupError = e.message
+                                } finally {
+                                    isLookingUp = false
+                                }
+                            }
+                        }
+                    }) {
+                        if (isLookingUp) CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        else Icon(Icons.Default.Search, contentDescription = "Look up")
+                    }
+                }
+                if (lookupError != null) {
+                    Text(lookupError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                
+                OutlinedTextField(value = definitions, onValueChange = { definitions = it }, label = { Text("Definitions") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                OutlinedTextField(value = pronunciation, onValueChange = { pronunciation = it }, label = { Text("Pronunciation") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = categories, onValueChange = { categories = it }, label = { Text("Categories (comma separated)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = synonyms, onValueChange = { synonyms = it }, label = { Text("Synonyms") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = antonyms, onValueChange = { antonyms = it }, label = { Text("Antonyms") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = notes, onValueChange = { notes = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             }
         },
         confirmButton = {
-            TextButton(enabled = word.isNotBlank(), onClick = {
-                onSave(DictionaryEntry(
-                    id = initial?.id ?: 0,
-                    word = word,
-                    definitions = definitions,
-                    examples = initial?.examples.orEmpty(),
-                    categories = categories,
-                    pronunciation = pronunciation,
-                    notes = notes,
-                    source = initial?.source ?: "User entry",
-                    synonyms = synonyms,
-                    antonyms = antonyms,
-                    collocations = initial?.collocations.orEmpty(),
-                    origin = initial?.origin.orEmpty(),
-                    translation = initial?.translation.orEmpty(),
-                    updatedAt = initial?.updatedAt ?: System.currentTimeMillis(),
-                ))
-            }) { Text("Save") }
+            TextButton(
+                onClick = {
+                    if (word.isNotBlank()) {
+                        val newEntry = initial?.copy(
+                            word = word.trim(),
+                            definitions = definitions.trim(),
+                            pronunciation = pronunciation.trim(),
+                            categories = categories.trim(),
+                            synonyms = synonyms.trim(),
+                            antonyms = antonyms.trim(),
+                            notes = notes.trim(),
+                            updatedAt = System.currentTimeMillis()
+                        ) ?: DictionaryEntry(
+                            word = word.trim(),
+                            definitions = definitions.trim(),
+                            pronunciation = pronunciation.trim(),
+                            categories = categories.trim(),
+                            synonyms = synonyms.trim(),
+                            antonyms = antonyms.trim(),
+                            notes = notes.trim()
+                        )
+                        onSave(newEntry)
+                    }
+                },
+                enabled = word.isNotBlank()
+            ) { Text("Save") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                if (initial != null) {
+                    TextButton(
+                        onClick = { onDelete(initial) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) { Text("Delete") }
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
     )
 }
