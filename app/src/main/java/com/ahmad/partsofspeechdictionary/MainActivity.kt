@@ -3,6 +3,8 @@ package com.ahmad.partsofspeechdictionary
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -152,9 +155,21 @@ class DictionaryViewModel(
 fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
     var refreshCounter by remember { mutableStateOf(0) }
     var showCategoryDialog by remember { mutableStateOf(false) }
+    var activeGroup by remember { mutableStateOf<String?>(null) }
+    
     val context = LocalContext.current
     var pendingImportJson by remember { mutableStateOf<String?>(null) }
     var showImportModeDialog by remember { mutableStateOf(false) }
+    BackHandler(enabled = vm.showEditor || showImportModeDialog || showCategoryDialog || activeGroup != null || vm.selectedCategory != null) {
+        when {
+            vm.showEditor -> vm.showEditor = false
+            showImportModeDialog -> showImportModeDialog = false
+            showCategoryDialog -> showCategoryDialog = false
+            activeGroup != null -> activeGroup = null
+            vm.selectedCategory != null -> vm.selectedCategory = null
+        }
+    }
+
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -196,21 +211,12 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
 
     val entries by vm.entries.collectAsStateWithLifecycle()
 
-    val masterCategories = listOf("Open Classes", "Closed Classes")
-    val distinctCategories = masterCategories
-
     val filteredEntries = entries.filter { entry ->
         val matchesQuery = vm.query.isBlank() ||
             entry.word.contains(vm.query, ignoreCase = true) ||
             entry.definitions.contains(vm.query, ignoreCase = true)
-
-        // 🚨 Hierarchical Filtering Logic
-        val matchesCategory = when (vm.selectedCategory) {
-            null -> true
-            "Open Classes" -> listOf("noun", "verb", "adjective", "adverb").any { entry.categories.contains(it, ignoreCase = true) }
-            "Closed Classes" -> listOf("pronoun", "preposition", "conjunction", "determiner", "article").any { entry.categories.contains(it, ignoreCase = true) }
-            else -> entry.categories.contains(vm.selectedCategory ?: "", ignoreCase = true)
-        }
+        val matchesCategory = vm.selectedCategory == null ||
+            entry.categories.contains(vm.selectedCategory ?: "", ignoreCase = true)
         matchesQuery && matchesCategory
     }
 
@@ -264,24 +270,38 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
             
             Spacer(Modifier.height(8.dp))
             
-            Button(
-                onClick = { showCategoryDialog = true },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = vm.selectedCategory ?: "Filter: All Words",
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+                if (vm.selectedCategory != null) {
+                    IconButton(onClick = { vm.selectedCategory = null }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+                Button(
+                    onClick = { showCategoryDialog = true },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                ) {
+                    Text(
+                        text = vm.selectedCategory ?: "Filter: All Words",
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
             }
             
             Spacer(Modifier.height(16.dp))
 
             if (vm.selectedCategory == null && vm.query.isBlank()) {
-                CategoryGrid(distinctCategories) { cat ->
-                    vm.selectedCategory = cat
-                    refreshCounter++
-                }
+                CategoryGrid(
+                    activeGroup = activeGroup,
+                    onGroupClick = { activeGroup = it },
+                    onCategoryClick = { cat ->
+                        vm.selectedCategory = cat
+                        refreshCounter++
+                    }
+                )
             } else {
                 key(refreshCounter) {
                     DictionaryList(filteredEntries, vm, pronunciationHelper, onRefresh = { refreshCounter++ })
@@ -325,7 +345,6 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
 
     if (showCategoryDialog) {
         SearchableCategoryDialog(
-            categories = distinctCategories,
             selected = vm.selectedCategory,
             onSelect = {
                 vm.selectedCategory = it
@@ -338,50 +357,14 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
 }
 
 @Composable
-fun SearchableCategoryDialog(
-    categories: List<String>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
-    onDismiss: () -> Unit
+fun CategoryGrid(
+    activeGroup: String?,
+    onGroupClick: (String?) -> Unit,
+    onCategoryClick: (String) -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
-    val filtered = categories.filter { it.contains(query, ignoreCase = true) }
+    val openClasses = listOf("Noun", "Verb", "Adjective", "Adverb")
+    val closedClasses = listOf("Pronoun", "Preposition", "Conjunction", "Determiner")
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Filter by Category") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search categories...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
-                )
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    item {
-                        ListItem(
-                            headlineContent = { Text("All Words", fontWeight = FontWeight.Bold) },
-                            modifier = Modifier.clickable { onSelect(null) }
-                        )
-                    }
-                    items(filtered) { cat ->
-                        ListItem(
-                            headlineContent = { Text(cat) },
-                            modifier = Modifier.clickable { onSelect(cat) }
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
-    )
-}
-
-@Composable
-fun CategoryGrid(categories: List<String>, onSelect: (String?) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
@@ -389,17 +372,43 @@ fun CategoryGrid(categories: List<String>, onSelect: (String?) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        item {
-            ElevatedCard(modifier = Modifier.clickable { onSelect(null) }) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("All Words", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        if (activeGroup == null) {
+            item {
+                ElevatedCard(modifier = Modifier.clickable { onCategoryClick("") }) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("All Words", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-        }
-        items(categories) { cat ->
-            ElevatedCard(modifier = Modifier.clickable { onSelect(cat) }) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(cat.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            item {
+                ElevatedCard(modifier = Modifier.clickable { onGroupClick("Open Classes") }) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Open Classes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            item {
+                ElevatedCard(modifier = Modifier.clickable { onGroupClick("Closed Classes") }) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Closed Classes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else {
+            item {
+                ElevatedCard(modifier = Modifier.clickable { onGroupClick(null) }) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("← Back", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            
+            val itemsToShow = if (activeGroup == "Open Classes") openClasses else closedClasses
+            items(itemsToShow) { cat ->
+                ElevatedCard(modifier = Modifier.clickable { onCategoryClick(cat) }) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(cat, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -609,5 +618,94 @@ fun EntryEditor(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         }
+    )
+}
+
+@Composable
+fun SearchableCategoryDialog(
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var activeDialogGroup by remember { mutableStateOf<String?>(null) }
+
+    val openClasses = listOf("Noun", "Verb", "Adjective", "Adverb")
+    val closedClasses = listOf("Pronoun", "Preposition", "Conjunction", "Determiner")
+    val allCategories = openClasses + closedClasses
+
+    // 🚨 System Back Button logic for the dialog drill-down
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Filter by Category") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { 
+                        query = it
+                        if (it.isNotBlank()) activeDialogGroup = null // Reset drill-down if searching
+                    },
+                    placeholder = { Text("Search categories...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                    if (query.isBlank()) {
+                        if (activeDialogGroup == null) {
+                            item {
+                                ListItem(
+                                    headlineContent = { Text("All Words", fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.clickable { onSelect(null) }
+                                )
+                            }
+                            item {
+                                ListItem(
+                                    headlineContent = { Text("Open Classes", fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.clickable { activeDialogGroup = "Open Classes" }
+                                )
+                            }
+                            item {
+                                ListItem(
+                                    headlineContent = { Text("Closed Classes", fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.clickable { activeDialogGroup = "Closed Classes" }
+                                )
+                            }
+                        } else {
+                            item {
+                                ListItem(
+                                    headlineContent = { Text("← Back", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.clickable { activeDialogGroup = null }
+                                )
+                            }
+                            val itemsToShow = if (activeDialogGroup == "Open Classes") openClasses else closedClasses
+                            items(itemsToShow) { cat ->
+                                ListItem(
+                                    headlineContent = { Text(cat) },
+                                    modifier = Modifier.clickable { onSelect(cat) }
+                                )
+                            }
+                        }
+                    } else {
+                        item {
+                            ListItem(
+                                headlineContent = { Text("All Words", fontWeight = FontWeight.Bold) },
+                                modifier = Modifier.clickable { onSelect(null) }
+                            )
+                        }
+                        val filtered = allCategories.filter { it.contains(query, ignoreCase = true) }
+                        items(filtered) { cat ->
+                            ListItem(
+                                headlineContent = { Text(cat) },
+                                modifier = Modifier.clickable { onSelect(cat) }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
