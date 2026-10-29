@@ -81,22 +81,8 @@ class DictionaryViewModel(
     var isLookingUp by mutableStateOf(false)
     var lookupError by mutableStateOf<String?>(null)
     var expandedEntryId by mutableStateOf<Long?>(null)
-    var actionsEntryId by mutableStateOf<Long?>(null)
-    var relatedMessage by mutableStateOf<String?>(null)
-
-    var selectedCollectionId by mutableStateOf<Long?>(null)
-        private set
-
-    var selectedCategory by mutableStateOf<WordCollection?>(null)
-    var collectionName by mutableStateOf("")
-        private set
-    var collectionError by mutableStateOf<String?>(null)
-        private set
-    var collectionToDelete by mutableStateOf<WordCollection?>(null)
-        private set
-
-    var backupJson by mutableStateOf<String?>(null)
-        private set
+    
+    var selectedCategory by mutableStateOf<String?>(null)
     var backupMessage by mutableStateOf<String?>(null)
         private set
     var backupError by mutableStateOf<String?>(null)
@@ -106,25 +92,10 @@ class DictionaryViewModel(
 
     private val selectedCollectionFlow = MutableStateFlow<Long?>(null)
 
-    val collections = repository.collections().stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
-    )
-    val collectionCounts = repository.collectionsWithCounts().stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
-    )
-    val allWordCount = repository.entryCount().stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), 0
-    )
-
     val entries = selectedCollectionFlow.flatMapLatest { collectionId ->
         if (collectionId == null) repository.entries("")
         else repository.entriesInCollection(collectionId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    fun selectCollection(id: Long?) {
-        selectedCollectionId = id
-        selectedCollectionFlow.value = id
-    }
 
     fun saveEntry(entry: DictionaryEntry) {
         viewModelScope.launch {
@@ -224,14 +195,22 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
     }
 
     val entries by vm.entries.collectAsStateWithLifecycle()
-    val collections by vm.collections.collectAsStateWithLifecycle()
+
+    val masterCategories = listOf("Open Classes", "Closed Classes")
+    val distinctCategories = masterCategories
 
     val filteredEntries = entries.filter { entry ->
         val matchesQuery = vm.query.isBlank() ||
             entry.word.contains(vm.query, ignoreCase = true) ||
             entry.definitions.contains(vm.query, ignoreCase = true)
-        val matchesCategory = vm.selectedCategory == null ||
-            entry.categories.contains(vm.selectedCategory?.name ?: "", ignoreCase = true)
+
+        // 🚨 Hierarchical Filtering Logic
+        val matchesCategory = when (vm.selectedCategory) {
+            null -> true
+            "Open Classes" -> listOf("noun", "verb", "adjective", "adverb").any { entry.categories.contains(it, ignoreCase = true) }
+            "Closed Classes" -> listOf("pronoun", "preposition", "conjunction", "determiner", "article").any { entry.categories.contains(it, ignoreCase = true) }
+            else -> entry.categories.contains(vm.selectedCategory ?: "", ignoreCase = true)
+        }
         matchesQuery && matchesCategory
     }
 
@@ -291,7 +270,7 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
             ) {
                 Text(
-                    text = vm.selectedCategory?.name ?: "Filter: All Words",
+                    text = vm.selectedCategory ?: "Filter: All Words",
                     color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
             }
@@ -299,8 +278,8 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
             Spacer(Modifier.height(16.dp))
 
             if (vm.selectedCategory == null && vm.query.isBlank()) {
-                CategoryGrid(collections) { col ->
-                    vm.selectedCategory = col
+                CategoryGrid(distinctCategories) { cat ->
+                    vm.selectedCategory = cat
                     refreshCounter++
                 }
             } else {
@@ -346,7 +325,7 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
 
     if (showCategoryDialog) {
         SearchableCategoryDialog(
-            collections = collections,
+            categories = distinctCategories,
             selected = vm.selectedCategory,
             onSelect = {
                 vm.selectedCategory = it
@@ -360,13 +339,13 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
 
 @Composable
 fun SearchableCategoryDialog(
-    collections: List<WordCollection>,
-    selected: WordCollection?,
-    onSelect: (WordCollection?) -> Unit,
+    categories: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = collections.filter { it.name.contains(query, ignoreCase = true) }
+    val filtered = categories.filter { it.contains(query, ignoreCase = true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -388,10 +367,10 @@ fun SearchableCategoryDialog(
                             modifier = Modifier.clickable { onSelect(null) }
                         )
                     }
-                    items(filtered) { col ->
+                    items(filtered) { cat ->
                         ListItem(
-                            headlineContent = { Text(col.name) },
-                            modifier = Modifier.clickable { onSelect(col) }
+                            headlineContent = { Text(cat) },
+                            modifier = Modifier.clickable { onSelect(cat) }
                         )
                     }
                 }
@@ -402,7 +381,7 @@ fun SearchableCategoryDialog(
 }
 
 @Composable
-fun CategoryGrid(collections: List<WordCollection>, onSelect: (WordCollection?) -> Unit) {
+fun CategoryGrid(categories: List<String>, onSelect: (String?) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
@@ -417,10 +396,10 @@ fun CategoryGrid(collections: List<WordCollection>, onSelect: (WordCollection?) 
                 }
             }
         }
-        items(collections) { col ->
-            ElevatedCard(modifier = Modifier.clickable { onSelect(col) }) {
+        items(categories) { cat ->
+            ElevatedCard(modifier = Modifier.clickable { onSelect(cat) }) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(col.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(cat.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
             }
         }
