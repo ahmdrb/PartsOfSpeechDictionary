@@ -1,14 +1,12 @@
 package com.ahmad.partsofspeechdictionary
 
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -19,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,7 +27,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -37,13 +35,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.ahmad.partsofspeechdictionary.data.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private lateinit var pronunciationHelper: PronunciationHelper
@@ -82,21 +78,18 @@ class DictionaryViewModel(
     var showEditor by mutableStateOf(false)
     var selectedEntry by mutableStateOf<DictionaryEntry?>(null)
     var expandedEntryId by mutableStateOf<Long?>(null)
-    
     var selectedCategory by mutableStateOf<String?>(null)
     
-    // Collections State
     var selectedCollection by mutableStateOf<WordCollection?>(null)
     var showCreateCollectionDialog by mutableStateOf(false)
     var showAddToCollectionDialog by mutableStateOf(false)
+    var wordToAddToCollection by mutableStateOf<DictionaryEntry?>(null)
+    var collectionToDelete by mutableStateOf<WordCollection?>(null)
 
-    // Backup State
-    var backupMessage by mutableStateOf<String?>(null)
-        private set
-    var backupError by mutableStateOf<String?>(null)
-        private set
-    var isBackupBusy by mutableStateOf(false)
-        private set
+    // Selection Mode State
+    var isSelectionMode by mutableStateOf(false)
+    var selectedWordIds by mutableStateOf(setOf<Long>())
+    var selectedCollectionIds by mutableStateOf(setOf<Long>())
 
     val allEntries = repository.entries("").stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val collections = repository.collections().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -110,6 +103,7 @@ class DictionaryViewModel(
     fun selectCollection(collection: WordCollection?) {
         selectedCollection = collection
         selectedCollectionFlow.value = collection?.id
+        clearSelection()
     }
 
     fun createCollection(name: String) {
@@ -119,16 +113,32 @@ class DictionaryViewModel(
         }
     }
 
+    fun deleteCollection(collection: WordCollection) {
+        viewModelScope.launch {
+            repository.deleteCollection(collection.id)
+            if (selectedCollection?.id == collection.id) selectCollection(null)
+            collectionToDelete = null
+        }
+    }
+
+    fun addWordToCollection(entry: DictionaryEntry, collection: WordCollection) {
+        viewModelScope.launch {
+            repository.addEntryToCollection(entry.id, collection.id)
+            wordToAddToCollection = null
+        }
+    }
+
+    fun removeWordFromCollection(entry: DictionaryEntry) {
+        val collection = selectedCollection ?: return
+        viewModelScope.launch { repository.removeEntryFromCollection(entry.id, collection.id) }
+    }
+
     fun toggleWordInCollection(entry: DictionaryEntry) {
         val collection = selectedCollection ?: return
         viewModelScope.launch {
-            // A hacky but effective way to check if it's already in the collection for now
             val isInCollection = collectionEntries.value.any { it.id == entry.id }
-            if (isInCollection) {
-                repository.removeEntryFromCollection(entry.id, collection.id)
-            } else {
-                repository.addEntryToCollection(entry.id, collection.id)
-            }
+            if (isInCollection) repository.removeEntryFromCollection(entry.id, collection.id)
+            else repository.addEntryToCollection(entry.id, collection.id)
         }
     }
 
@@ -140,8 +150,43 @@ class DictionaryViewModel(
     }
 
     fun deleteEntry(entry: DictionaryEntry) {
+        viewModelScope.launch { repository.delete(entry.id) }
+    }
+
+    // Selection Logic
+    fun toggleSelection(id: Long, isWord: Boolean) {
+        if (isWord) {
+            selectedWordIds = if (selectedWordIds.contains(id)) selectedWordIds - id else selectedWordIds + id
+        } else {
+            selectedCollectionIds = if (selectedCollectionIds.contains(id)) selectedCollectionIds - id else selectedCollectionIds + id
+        }
+    }
+
+    fun selectAll(isWord: Boolean) {
+        if (isWord) {
+            val allIds = collectionEntries.value.map { it.id }.toSet()
+            selectedWordIds = if (selectedWordIds.size == allIds.size) emptySet() else allIds
+        } else {
+            val allIds = collections.value.map { it.id }.toSet()
+            selectedCollectionIds = if (selectedCollectionIds.size == allIds.size) emptySet() else allIds
+        }
+    }
+
+    fun clearSelection() {
+        isSelectionMode = false
+        selectedWordIds = emptySet()
+        selectedCollectionIds = emptySet()
+    }
+
+    fun deleteSelected(isWord: Boolean) {
         viewModelScope.launch {
-            repository.delete(entry.id)
+            if (isWord) {
+                val collection = selectedCollection ?: return@launch
+                selectedWordIds.forEach { repository.removeEntryFromCollection(it, collection.id) }
+            } else {
+                selectedCollectionIds.forEach { repository.deleteCollection(it) }
+            }
+            clearSelection()
         }
     }
 }
@@ -150,13 +195,16 @@ class DictionaryViewModel(
 @Composable
 fun MainApp(vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
     var currentTab by remember { mutableIntStateOf(0) }
+    var showTopMenu by remember { mutableStateOf(false) }
 
-    // Global Back Handler
-    BackHandler(enabled = vm.showEditor || vm.selectedCollection != null || vm.selectedCategory != null || vm.showAddToCollectionDialog || vm.showCreateCollectionDialog) {
+    BackHandler(enabled = vm.isSelectionMode || vm.showEditor || vm.selectedCollection != null || vm.selectedCategory != null || vm.showAddToCollectionDialog || vm.showCreateCollectionDialog || vm.wordToAddToCollection != null || vm.collectionToDelete != null) {
         when {
-            vm.showEditor -> vm.showEditor = false
+            vm.isSelectionMode -> vm.clearSelection()
+            vm.collectionToDelete != null -> vm.collectionToDelete = null
+            vm.wordToAddToCollection != null -> vm.wordToAddToCollection = null
             vm.showAddToCollectionDialog -> vm.showAddToCollectionDialog = false
             vm.showCreateCollectionDialog -> vm.showCreateCollectionDialog = false
+            vm.showEditor -> vm.showEditor = false
             vm.selectedCollection != null -> vm.selectCollection(null)
             vm.selectedCategory != null -> vm.selectedCategory = null
         }
@@ -164,54 +212,104 @@ fun MainApp(vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { 
-                    Column {
-                        Text("Wordwise", fontWeight = FontWeight.Bold)
-                        Text(if (currentTab == 0) "Parts of Speech Dictionary" else "My Collections", style = MaterialTheme.typography.labelSmall)
+            if (vm.isSelectionMode) {
+                val isWord = currentTab == 1 && vm.selectedCollection != null
+                val count = if (isWord) vm.selectedWordIds.size else vm.selectedCollectionIds.size
+                val allSelected = if (isWord) vm.selectedWordIds.size == vm.collectionEntries.value.size else vm.selectedCollectionIds.size == vm.collections.value.size
+                
+                TopAppBar(
+                    title = { Text("$count selected") },
+                    navigationIcon = { IconButton(onClick = { vm.clearSelection() }) { Icon(Icons.Default.Close, contentDescription = "Close") } },
+                    actions = {
+                        IconButton(onClick = { vm.selectAll(isWord) }) {
+                            Icon(if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll, contentDescription = "Select All")
+                        }
+                        IconButton(onClick = { vm.deleteSelected(isWord) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                        }
                     }
-                }
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = currentTab == 0,
-                    onClick = { currentTab = 0 },
-                    icon = { Icon(Icons.Default.Search, contentDescription = "Dictionary") },
-                    label = { Text("Dictionary") }
                 )
-                NavigationBarItem(
-                    selected = currentTab == 1,
-                    onClick = { currentTab = 1; vm.selectCollection(null) },
-                    icon = { Icon(Icons.Default.Star, contentDescription = "Collections") },
-                    label = { Text("Collections") }
+            } else {
+                TopAppBar(
+                    title = { 
+                        Column {
+                            Text("Wordwise", fontWeight = FontWeight.Bold)
+                            Text(if (currentTab == 0) "Parts of Speech Dictionary" else if (vm.selectedCollection == null) "My Collections" else vm.selectedCollection!!.name, style = MaterialTheme.typography.labelSmall)
+                        }
+                    },
+                    actions = {
+                        if (currentTab == 1) {
+                            Box {
+                                IconButton(onClick = { showTopMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Menu") }
+                                DropdownMenu(expanded = showTopMenu, onDismissRequest = { showTopMenu = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Select Items") },
+                                        onClick = { vm.isSelectionMode = true; showTopMenu = false },
+                                        leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 )
             }
         },
+        bottomBar = {
+            if (!vm.isSelectionMode) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0 },
+                        icon = { Icon(Icons.Default.Search, contentDescription = "Dictionary") },
+                        label = { Text("Dictionary") }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1; vm.selectCollection(null) },
+                        icon = { Icon(Icons.Default.Star, contentDescription = "Collections") },
+                        label = { Text("Collections") }
+                    )
+                }
+            }
+        },
         floatingActionButton = {
-            if (currentTab == 0) {
-                FloatingActionButton(onClick = { vm.selectedEntry = null; vm.showEditor = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add word")
-                }
-            } else if (vm.selectedCollection == null) {
-                FloatingActionButton(onClick = { vm.showCreateCollectionDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "New Collection")
-                }
-            } else {
-                FloatingActionButton(onClick = { vm.showAddToCollectionDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Words")
+            if (!vm.isSelectionMode) {
+                if (currentTab == 0) {
+                    FloatingActionButton(onClick = { vm.selectedEntry = null; vm.showEditor = true }) { Icon(Icons.Default.Add, contentDescription = "Add word") }
+                } else if (vm.selectedCollection == null) {
+                    FloatingActionButton(onClick = { vm.showCreateCollectionDialog = true }) { Icon(Icons.Default.Add, contentDescription = "New Collection") }
+                } else {
+                    FloatingActionButton(onClick = { vm.showAddToCollectionDialog = true }) { Icon(Icons.Default.Add, contentDescription = "Add Words") }
                 }
             }
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            if (currentTab == 0) {
-                DictionaryScreen(vm, pronunciationHelper)
-            } else {
-                CollectionsScreen(vm)
-            }
+            if (currentTab == 0) DictionaryScreen(vm, pronunciationHelper)
+            else CollectionsScreen(vm, pronunciationHelper)
         }
+    }
+
+    if (vm.wordToAddToCollection != null) {
+        val collections by vm.collections.collectAsStateWithLifecycle()
+        AlertDialog(
+            onDismissRequest = { vm.wordToAddToCollection = null },
+            title = { Text("Add '${vm.wordToAddToCollection?.word}' to...") },
+            text = {
+                if (collections.isEmpty()) Text("No collections yet. Create one in the Collections tab.")
+                else {
+                    LazyColumn {
+                        items(collections) { col ->
+                            ListItem(
+                                headlineContent = { Text(col.name) },
+                                modifier = Modifier.clickable { vm.addWordToCollection(vm.wordToAddToCollection!!, col) }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.wordToAddToCollection = null }) { Text("Cancel") } }
+        )
     }
 
     if (vm.showEditor) {
@@ -219,9 +317,37 @@ fun MainApp(vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
             initial = vm.selectedEntry,
             onDismiss = { vm.showEditor = false },
             onSave = { vm.saveEntry(it); vm.showEditor = false },
-            onDelete = { vm.deleteEntry(it); vm.showEditor = false }
+            onDelete = { vm.deleteEntry(it); vm.showEditor = false },
+            onAddToCollection = { vm.wordToAddToCollection = it }
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeToDeleteContainer(onDelete: () -> Unit, content: @Composable () -> Unit) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = {
+            if (it == SwipeToDismissBoxValue.EndToStart || it == SwipeToDismissBoxValue.StartToEnd) {
+                onDelete()
+                true
+            } else false
+        }
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = true,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            Box(
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)).padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        },
+        content = { content() }
+    )
 }
 
 @Composable
@@ -248,9 +374,7 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
             placeholder = { Text("Search words and definitions") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {
-                if (vm.query.isNotBlank()) {
-                    IconButton(onClick = { vm.query = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear") }
-                }
+                if (vm.query.isNotBlank()) IconButton(onClick = { vm.query = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear") }
             },
             singleLine = true
         )
@@ -262,7 +386,7 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
                 IconButton(onClick = { vm.selectedCategory = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             }
             Button(
-                onClick = { /* We can add the searchable dialog back later if needed */ },
+                onClick = { /* Search filter */ },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
             ) {
@@ -303,18 +427,13 @@ fun DictionaryScreen(vm: DictionaryViewModel, pronunciationHelper: Pronunciation
 fun CategoryCard(title: String, isGroup: Boolean, onClick: () -> Unit) {
     ElevatedCard(modifier = Modifier.clickable { onClick() }) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (title.startsWith("←")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-            )
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (title.startsWith("←")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
         }
     }
 }
 
 @Composable
-fun CollectionsScreen(vm: DictionaryViewModel) {
+fun CollectionsScreen(vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
     val collections by vm.collections.collectAsStateWithLifecycle()
     val collectionEntries by vm.collectionEntries.collectAsStateWithLifecycle()
 
@@ -326,40 +445,46 @@ fun CollectionsScreen(vm: DictionaryViewModel) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(collections) { col ->
-                ElevatedCard(modifier = Modifier.clickable { vm.selectCollection(col) }) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(col.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                SwipeToDeleteContainer(onDelete = { vm.deleteCollection(col) }) {
+                    ElevatedCard(modifier = Modifier.fillMaxWidth().clickable { 
+                        if (vm.isSelectionMode) vm.toggleSelection(col.id, false) else vm.selectCollection(col) 
+                    }) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (vm.isSelectionMode) {
+                                Checkbox(checked = vm.selectedCollectionIds.contains(col.id), onCheckedChange = { vm.toggleSelection(col.id, false) })
+                            }
+                            Text(col.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
         }
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = { vm.selectCollection(null) }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            if (!vm.isSelectionMode) {
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { vm.selectCollection(null) }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 }
-                Text(
-                    text = vm.selectedCollection!!.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+            } else {
+                Spacer(Modifier.height(8.dp))
             }
             
             if (collectionEntries.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No words in this collection yet.\nTap + to add words.", textAlign = TextAlign.Center)
-                }
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No words here yet.", textAlign = TextAlign.Center) }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
                     items(collectionEntries) { entry ->
-                        ListItem(
-                            headlineContent = { Text(entry.word, fontWeight = FontWeight.Bold) },
-                            supportingContent = { Text(entry.definitions, maxLines = 1) }
-                        )
+                        SwipeToDeleteContainer(onDelete = { vm.removeWordFromCollection(entry) }) {
+                            EntryCard(
+                                entry = entry,
+                                vm = vm,
+                                pronunciationHelper = pronunciationHelper,
+                                isInsideCollection = true,
+                                isSelectionMode = vm.isSelectionMode,
+                                isSelected = vm.selectedWordIds.contains(entry.id),
+                                onToggleSelection = { vm.toggleSelection(entry.id, true) }
+                            )
+                        }
                     }
                 }
             }
@@ -371,102 +496,82 @@ fun CollectionsScreen(vm: DictionaryViewModel) {
         AlertDialog(
             onDismissRequest = { vm.showCreateCollectionDialog = false },
             title = { Text("New Collection") },
-            text = {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Collection Name") })
-            },
-            confirmButton = {
-                TextButton(onClick = { if (name.isNotBlank()) vm.createCollection(name) }) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.showCreateCollectionDialog = false }) { Text("Cancel") }
-            }
+            text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Collection Name") }) },
+            confirmButton = { TextButton(onClick = { if (name.isNotBlank()) vm.createCollection(name) }) { Text("Create") } },
+            dismissButton = { TextButton(onClick = { vm.showCreateCollectionDialog = false }) { Text("Cancel") } }
         )
     }
 
     if (vm.showAddToCollectionDialog) {
-        AddWordsDialog(vm)
-    }
-}
+        val allEntries by vm.allEntries.collectAsStateWithLifecycle()
+        val collectionEntries by vm.collectionEntries.collectAsStateWithLifecycle()
+        var query by remember { mutableStateOf("") }
+        val filtered = allEntries.filter { it.word.contains(query, ignoreCase = true) }
 
-@Composable
-fun AddWordsDialog(vm: DictionaryViewModel) {
-    val allEntries by vm.allEntries.collectAsStateWithLifecycle()
-    val collectionEntries by vm.collectionEntries.collectAsStateWithLifecycle()
-    var query by remember { mutableStateOf("") }
-    
-    val filtered = allEntries.filter { it.word.contains(query, ignoreCase = true) }
-
-    AlertDialog(
-        onDismissRequest = { vm.showAddToCollectionDialog = false },
-        title = { Text("Add Words to '${vm.selectedCollection?.name}'") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search words...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
-                )
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 350.dp)) {
-                    items(filtered) { entry ->
-                        val isInCollection = collectionEntries.any { it.id == entry.id }
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { vm.toggleWordInCollection(entry) },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = isInCollection,
-                                onCheckedChange = { vm.toggleWordInCollection(entry) }
-                            )
-                            Text(entry.word, fontWeight = if (isInCollection) FontWeight.Bold else FontWeight.Normal)
+        AlertDialog(
+            onDismissRequest = { vm.showAddToCollectionDialog = false },
+            title = { Text("Add Words to '${vm.selectedCollection?.name}'") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = query, onValueChange = { query = it }, placeholder = { Text("Search words...") },
+                        modifier = Modifier.fillMaxWidth(), leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(modifier = Modifier.heightIn(max = 350.dp)) {
+                        items(filtered) { entry ->
+                            val isInCollection = collectionEntries.any { it.id == entry.id }
+                            Row(modifier = Modifier.fillMaxWidth().clickable { vm.toggleWordInCollection(entry) }, verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isInCollection, onCheckedChange = { vm.toggleWordInCollection(entry) })
+                                Text(entry.word, fontWeight = if (isInCollection) FontWeight.Bold else FontWeight.Normal)
+                            }
                         }
                     }
                 }
-            }
-        },
-        confirmButton = { TextButton(onClick = { vm.showAddToCollectionDialog = false }) { Text("Done") } }
-    )
+            },
+            confirmButton = { TextButton(onClick = { vm.showAddToCollectionDialog = false }) { Text("Done") } }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DictionaryList(
-    entries: List<DictionaryEntry>,
-    vm: DictionaryViewModel,
-    pronunciationHelper: PronunciationHelper,
-    onRefresh: () -> Unit
-) {
+fun DictionaryList(entries: List<DictionaryEntry>, vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper, onRefresh: () -> Unit) {
     if (entries.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No words found.", style = MaterialTheme.typography.bodyLarge)
-        }
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No words found.", style = MaterialTheme.typography.bodyLarge) }
         return
     }
-
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(bottom = 80.dp)
-    ) {
-        items(entries, key = { it.id }) { entry ->
-            EntryCard(entry, vm, pronunciationHelper)
-        }
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
+        items(entries, key = { it.id }) { entry -> EntryCard(entry, vm, pronunciationHelper) }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EntryCard(entry: DictionaryEntry, vm: DictionaryViewModel, pronunciationHelper: PronunciationHelper) {
+fun EntryCard(
+    entry: DictionaryEntry, 
+    vm: DictionaryViewModel, 
+    pronunciationHelper: PronunciationHelper,
+    isInsideCollection: Boolean = false,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {}
+) {
     val isExpanded = vm.expandedEntryId == entry.id
     ElevatedCard(
         modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = { vm.expandedEntryId = if (isExpanded) null else entry.id },
-            onLongClick = { vm.selectedEntry = entry; vm.showEditor = true }
+            onClick = { 
+                if (isSelectionMode) onToggleSelection() 
+                else vm.expandedEntryId = if (isExpanded) null else entry.id 
+            },
+            onLongClick = { if (!isSelectionMode) { vm.selectedEntry = entry; vm.showEditor = true } }
         )
     ) {
         Column(modifier = Modifier.padding(16.dp).animateContentSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isSelectionMode) {
+                    Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+                }
                 Text(entry.word, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 if (isExpanded && !entry.pronunciation.isNullOrBlank()) {
                     Spacer(Modifier.width(8.dp))
@@ -495,7 +600,8 @@ fun EntryEditor(
     initial: DictionaryEntry?,
     onDismiss: () -> Unit,
     onSave: (DictionaryEntry) -> Unit,
-    onDelete: (DictionaryEntry) -> Unit
+    onDelete: (DictionaryEntry) -> Unit,
+    onAddToCollection: (DictionaryEntry) -> Unit
 ) {
     var word by remember(initial) { mutableStateOf(initial?.word ?: "") }
     var definitions by remember(initial) { mutableStateOf(initial?.definitions ?: "") }
@@ -517,6 +623,15 @@ fun EntryEditor(
                 OutlinedTextField(value = synonyms, onValueChange = { synonyms = it }, label = { Text("Synonyms") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = antonyms, onValueChange = { antonyms = it }, label = { Text("Antonyms") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = notes, onValueChange = { notes = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                
+                if (initial != null) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { onAddToCollection(initial) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add to Collection")
+                    }
+                }
             }
         },
         confirmButton = {
